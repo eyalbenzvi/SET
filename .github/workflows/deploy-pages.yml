@@ -20,9 +20,13 @@ concurrency:
 jobs:
   build:
     name: Build
+    # Deploys from the default branch, or from `main` when that is not the
+    # default (yet). Without the second clause a push to a `main` that is not the
+    # default branch would silently skip, which looks like nothing happened.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.ref_name == github.event.repository.default_branch
+      github.ref_name == github.event.repository.default_branch ||
+      github.ref_name == 'main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
