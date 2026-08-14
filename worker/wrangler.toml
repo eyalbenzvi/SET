@@ -1,0 +1,28 @@
+name = "set-game-worker"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# ---------------------------------------------------------------------------
+# Browser origins allowed to use this backend.
+#
+# Replace the placeholder below with your GitHub Pages origin — the scheme and
+# host only, no path:
+#     https://<your-github-username>.github.io
+#
+# Multiple origins are comma-separated. localhost and 127.0.0.1 are always
+# allowed, so local development needs no change here.
+# ---------------------------------------------------------------------------
+[vars]
+ALLOWED_ORIGINS = "https://REPLACE-ME.github.io"
+
+[[durable_objects.bindings]]
+name = "GAME_ROOM"
+class_name = "GameRoomDO"
+
+# SQLite-backed Durable Objects — available on the Cloudflare free plan.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameRoomDO"]
+
+[observability]
+enabled = true

@@ -1,0 +1,17 @@
+{
+  "name": "@set/shared",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Pure SET rules engine, authoritative room state machine, and wire protocol. No UI, network, storage or Cloudflare dependencies.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  }
+}
