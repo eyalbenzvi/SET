@@ -144,10 +144,18 @@ The Durable Object binding and its migration are already declared in
 `worker/wrangler.toml`; `GameRoomDO` uses the SQLite-backed storage class, which
 is available on the Cloudflare free plan. There are no secrets to configure.
 
-There is also a manual **Deploy Worker to Cloudflare** GitHub Action if you would
-rather not deploy from your machine; it needs a `CLOUDFLARE_API_TOKEN` secret and
-a `CLOUDFLARE_ACCOUNT_ID` variable. See
-`.github/workflows/deploy-worker.yml`.
+### Deploying the Worker without a terminal
+
+There is a **Deploy Worker to Cloudflare** GitHub Action for deploying entirely
+from a browser. It needs, under **Settings → Secrets and variables → Actions**:
+
+- secret `CLOUDFLARE_API_TOKEN` — create one at **dash.cloudflare.com → profile →
+  API Tokens → Create Token → "Edit Cloudflare Workers" template**
+- variable `CLOUDFLARE_ACCOUNT_ID` — the id in the dashboard URL after you log in
+
+It then runs on every push to the default branch, and can be started by hand from
+the **Actions** tab. If a run failed because the credentials were not set yet, add
+them and press **Re-run all jobs** on that run — no push needed.
 
 ## Deploy the frontend (GitHub Pages)
 
@@ -158,12 +166,17 @@ a `CLOUDFLARE_ACCOUNT_ID` variable. See
    variables → Actions → Variables → New repository variable**, named
    `SET_API_BASE`, value `https://set-game-worker.<your-subdomain>.workers.dev`.
 
-3. Push to `main`. The **Deploy frontend to GitHub Pages** workflow builds with
-   the correct base path (taken from `actions/configure-pages`, so a project site
-   at `/<repo>/` and a user site at `/` both work) and publishes `frontend/dist`.
+3. Push to the default branch, or start **Deploy frontend to GitHub Pages** from
+   the **Actions** tab. It builds with the correct base path (taken from
+   `actions/configure-pages`, so a project site at `/<repo>/` and a user site at
+   `/` both work) and publishes `frontend/dist`.
 
 If `SET_API_BASE` is missing, the workflow fails with a message saying so instead
-of shipping a broken build.
+of shipping a broken build. Set it and press **Re-run all jobs** on the failed run.
+
+Both deploy workflows key off the repository's _default branch_ rather than a
+branch literally named `main`, so they work before a `main` branch exists and
+keep working if you rename the trunk later.
 
 To deploy by hand instead:
 

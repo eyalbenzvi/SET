@@ -1,8 +1,9 @@
 name: Deploy frontend to GitHub Pages
 
+# Publishes on a push to the default branch — whatever it is called — so this
+# works before a `main` branch exists, and keeps working after one is created.
 on:
   push:
-    branches: [main]
   workflow_dispatch:
 
 # Required for the official Pages deployment action.
@@ -19,6 +20,9 @@ concurrency:
 jobs:
   build:
     name: Build
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
