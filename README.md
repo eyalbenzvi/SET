@@ -35,6 +35,20 @@ five-second pause if they were wrong. The game ends when the deck is empty and n
 set remains; final ranking is by number of sets found, and equal scores are a
 genuine tie.
 
+The four questions players ask first, answered explicitly:
+
+- **Whose turn is it?** Nobody's. There are no turns at all — everyone looks at the
+  same twelve cards at the same moment and the first correct claim wins them.
+- **When does the turn pass?** It doesn't. Play only pauses for the one player who
+  claimed wrongly, for five seconds, while everyone else keeps going.
+- **Does the board refill?** Yes, back to twelve: a claimed set is replaced in the
+  same three places, so the layout does not jump around. Once the deck runs out the
+  board simply gets smaller. The exception is a correct **No SET on board**, which
+  deals three extra cards on top — the board then holds 15 (or 18, 21…) until a set
+  is taken from it, and only then shrinks back towards twelve.
+- **Is there a deck?** Yes — 81 cards, minus the twelve on the table. The header
+  shows how many are left, so everyone can see the endgame coming.
+
 ## Prerequisites
 
 - **Node.js 20.19+ or 22.12+** (the repo is developed and tested on 22) and npm 10+.
@@ -144,10 +158,18 @@ The Durable Object binding and its migration are already declared in
 `worker/wrangler.toml`; `GameRoomDO` uses the SQLite-backed storage class, which
 is available on the Cloudflare free plan. There are no secrets to configure.
 
-There is also a manual **Deploy Worker to Cloudflare** GitHub Action if you would
-rather not deploy from your machine; it needs a `CLOUDFLARE_API_TOKEN` secret and
-a `CLOUDFLARE_ACCOUNT_ID` variable. See
-`.github/workflows/deploy-worker.yml`.
+### Deploying the Worker without a terminal
+
+There is a **Deploy Worker to Cloudflare** GitHub Action for deploying entirely
+from a browser. It needs, under **Settings → Secrets and variables → Actions**:
+
+- secret `CLOUDFLARE_API_TOKEN` — create one at **dash.cloudflare.com → profile →
+  API Tokens → Create Token → "Edit Cloudflare Workers" template**
+- variable `CLOUDFLARE_ACCOUNT_ID` — the id in the dashboard URL after you log in
+
+It then runs on every push to the default branch, and can be started by hand from
+the **Actions** tab. If a run failed because the credentials were not set yet, add
+them and press **Re-run all jobs** on that run — no push needed.
 
 ## Deploy the frontend (GitHub Pages)
 
@@ -158,12 +180,17 @@ a `CLOUDFLARE_ACCOUNT_ID` variable. See
    variables → Actions → Variables → New repository variable**, named
    `SET_API_BASE`, value `https://set-game-worker.<your-subdomain>.workers.dev`.
 
-3. Push to `main`. The **Deploy frontend to GitHub Pages** workflow builds with
-   the correct base path (taken from `actions/configure-pages`, so a project site
-   at `/<repo>/` and a user site at `/` both work) and publishes `frontend/dist`.
+3. Push to the default branch, or start **Deploy frontend to GitHub Pages** from
+   the **Actions** tab. It builds with the correct base path (taken from
+   `actions/configure-pages`, so a project site at `/<repo>/` and a user site at
+   `/` both work) and publishes `frontend/dist`.
 
 If `SET_API_BASE` is missing, the workflow fails with a message saying so instead
-of shipping a broken build.
+of shipping a broken build. Set it and press **Re-run all jobs** on the failed run.
+
+Both deploy workflows key off the repository's _default branch_ rather than a
+branch literally named `main`, so they work before a `main` branch exists and
+keep working if you rename the trunk later.
 
 To deploy by hand instead:
 
@@ -221,10 +248,18 @@ can be tested in plain Node.
 - **Colour is never the only signal.** Every card carries a full text label,
   shapes and shading are distinct, selection is shown with a border, a lift and a
   numbered badge, and an optional switch adds R/G/P letters to each card.
-- **English by default**, with every user-facing string in `frontend/src/i18n/en.ts`.
-  Adding Hebrew means adding one dictionary and setting `meta.dir` to `rtl`; no
-  component contains literal display text, and the shell already applies `dir` to
-  `<html>`.
+- **Hebrew by default, English one tap away.** Every user-facing string lives in a
+  dictionary (`frontend/src/i18n/he.ts`, `frontend/src/i18n/en.ts`); no component
+  contains literal display text. A dictionary declares its own `meta.dir`, and the
+  shell applies that to `<html dir>`, so Hebrew renders right-to-left throughout.
+  The choice is remembered in `localStorage`; the browser's own language is
+  deliberately not consulted, because a phone set to English is not evidence that
+  its owner wants an English board. Adding a third language means adding one
+  dictionary and nothing else.
+- **Card labels agree grammatically.** Hebrew inflects the shape, colour and
+  shading together with the count — a two-symbol card reads
+  `2 מעוינים אדומים מפוספסים`, not the singular forms — so the labels a screen
+  reader speaks are real sentences in both languages.
 
 ## Known limitations
 

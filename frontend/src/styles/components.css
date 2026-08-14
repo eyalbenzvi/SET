@@ -649,3 +649,160 @@
   color: var(--ink-muted);
   font-size: 1rem;
 }
+
+/* ---------------------------------------------------------------- Invite */
+
+.invite__body {
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+
+/* Code and QR side by side once there is room for both. */
+.invite__ways {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.invite__ways .roomCode {
+  flex: 1 1 12rem;
+}
+
+.invite__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.invite__actions .btn {
+  flex: 1 1 8rem;
+}
+
+.btn--done {
+  background: var(--good-soft);
+  color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 40%, transparent);
+}
+
+.invite__note:empty {
+  display: none;
+}
+
+.invite__note {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.invite__url {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+  /* A URL is left-to-right even inside a right-to-left page. */
+  direction: ltr;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.disclosure summary {
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--ink-muted);
+  cursor: pointer;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+/* ---------------------------------------------------------------- QR */
+
+.qrFigure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+/* White plate in both themes: scanners read contrast and expect that polarity. */
+.qrFigure__plate {
+  display: block;
+  padding: 6px;
+  background: #fff;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+
+.qr {
+  display: block;
+  width: 116px;
+  height: 116px;
+}
+
+.qrFigure__caption {
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+}
+
+/* ---------------------------------------------------------------- Notice */
+
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  border-inline-start: 4px solid var(--accent);
+}
+
+.notice__title {
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.notice__body {
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+}
+
+/* ---------------------------------------------------------------- Language */
+
+.langSwitch {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+}
+
+.langSwitch .btn {
+  border-radius: 999px;
+  min-height: 30px;
+}
+
+.btn--current {
+  box-shadow: var(--shadow-sm);
+}
+
+.settingsBar {
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.tutorial__list--flow li {
+  margin-bottom: 6px;
+}
+
+/* A room code is Latin letters and digits; keep it left-to-right in Hebrew. */
+.roomCode__value,
+.field__input--code {
+  direction: ltr;
+  unicode-bidi: isolate;
+}

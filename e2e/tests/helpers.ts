@@ -15,9 +15,24 @@ export interface PlayerSession {
   name: string;
 }
 
-/** Open a fresh browser context (its own localStorage) for one player. */
-export async function newPlayer(browser: Browser, name: string): Promise<PlayerSession> {
+/**
+ * Open a fresh browser context (its own localStorage) for one player.
+ *
+ * The app defaults to Hebrew. These suites assert on English wording, so the
+ * locale is pinned here through the same localStorage key the language switch
+ * writes — `locale.spec.ts` covers the Hebrew default and the switch itself.
+ */
+export async function newPlayer(
+  browser: Browser,
+  name: string,
+  locale: 'en' | 'he' | null = 'en',
+): Promise<PlayerSession> {
   const context = await browser.newContext();
+  if (locale) {
+    await context.addInitScript((value: string) => {
+      window.localStorage.setItem('set.locale', value);
+    }, locale);
+  }
   const page = await context.newPage();
   return { context, page, name };
 }

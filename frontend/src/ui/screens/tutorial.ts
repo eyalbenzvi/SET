@@ -83,7 +83,20 @@ export function createTutorial(onClose: () => void): HTMLElement {
       exampleRow(VALID_ALL_DIFFERENT, t('tutorial.validAllDiffHeading'), true),
       exampleRow(INVALID_TWO_PURPLE, t('tutorial.invalidHeading'), false),
       el('p', { class: 'tutorial__why', text: t('tutorial.invalidWhy') }),
-      el('p', { class: 'modal__body', text: t('tutorial.flow') }),
+
+      // "Whose turn is it?" was the single most common confusion, so the flow is
+      // spelled out point by point rather than in one dense paragraph.
+      el('p', { class: 'modal__label', text: t('tutorial.flowTitle') }),
+      el('ul', {
+        class: 'tutorial__list tutorial__list--flow',
+        children: [
+          el('li', { text: t('tutorial.flowTurns') }),
+          el('li', { text: t('tutorial.flowClaim') }),
+          el('li', { text: t('tutorial.flowRefill') }),
+          el('li', { text: t('tutorial.flowNoSet') }),
+          el('li', { text: t('tutorial.flowDeck') }),
+        ],
+      }),
       button(t('tutorial.gotIt'), 'primary', onClose, { class: 'btn--block' }),
     ],
   });
