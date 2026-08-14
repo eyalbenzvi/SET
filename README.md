@@ -49,6 +49,29 @@ The four questions players ask first, answered explicitly:
 - **Is there a deck?** Yes — 81 cards, minus the twelve on the table. The header
   shows how many are left, so everyone can see the endgame coming.
 
+### Three things the table can do together
+
+- **More cards, by agreement.** Anyone can tap **+3 cards**. Nothing happens until
+  every connected player has asked for it, and then three cards are dealt on top of
+  the board. This is the only way to grow the board while a set is still findable,
+  and requiring the whole table means one stuck player can never blow up a position
+  somebody else has already spotted. A request lapses after 45 seconds, and any
+  board change cancels it, so a forgotten tap never deals into a different
+  position. The board stops at **21 cards**: the largest set-free collection in SET
+  is 20 cards, so 21 face-up cards are guaranteed to contain a set and more can
+  never help.
+- **Hints, on a clock.** After a minute on the same board, **Hint 1** marks one card
+  that really is part of a set. A minute later, **Hint 2** marks two — which leaves
+  exactly one card that can complete them. The clock runs on the current board and
+  restarts whenever the board changes, so it measures time actually spent stuck. The
+  cards go only to the player who asked; everyone else is told a hint was taken and
+  never which cards it named. The server refuses a hint on a set-free board and says
+  so, which is a nudge towards **No SET on board** rather than a leak.
+- **See the set that was just taken.** When anyone claims a set, the three cards
+  appear at the top of every screen for a few seconds, with who took them. Without
+  it, a player looking at another corner of the board never finds out what the set
+  was.
+
 ## Prerequisites
 
 - **Node.js 20.19+ or 22.12+** (the repo is developed and tested on 22) and npm 10+.

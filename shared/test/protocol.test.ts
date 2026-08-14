@@ -186,4 +186,34 @@ describe('parseClientMessage', () => {
       expect(parseClientMessage(encode({ t }))).toEqual({ ok: true, value: { t } });
     }
   });
+
+  it('accepts a request for more cards, either way round', () => {
+    for (const want of [true, false]) {
+      expect(parseClientMessage(encode({ t: 'deal', want, boardVersion: 4 }))).toEqual({
+        ok: true,
+        value: { t: 'deal', want, boardVersion: 4 },
+      });
+    }
+  });
+
+  it('rejects a request for more cards with a missing or non-boolean intent', () => {
+    expect(expectRejected(encode({ t: 'deal', boardVersion: 1 }))).toContain('want');
+    // A truthy string must not be coerced into a vote.
+    expect(expectRejected(encode({ t: 'deal', want: 'yes', boardVersion: 1 }))).toContain('want');
+    expect(expectRejected(encode({ t: 'deal', want: 1, boardVersion: 1 }))).toContain('want');
+    expect(expectRejected(encode({ t: 'deal', want: true }))).toContain('boardVersion');
+  });
+
+  it('accepts only the two hint levels that exist', () => {
+    for (const level of [1, 2]) {
+      expect(parseClientMessage(encode({ t: 'hint', level, boardVersion: 2 }))).toEqual({
+        ok: true,
+        value: { t: 'hint', level, boardVersion: 2 },
+      });
+    }
+    for (const level of [0, 3, -1, 1.5, '1', null]) {
+      expect(expectRejected(encode({ t: 'hint', level, boardVersion: 2 }))).toContain('level');
+    }
+    expect(expectRejected(encode({ t: 'hint', level: 1 }))).toContain('boardVersion');
+  });
 });

@@ -9,9 +9,10 @@ import { setLocale } from '../src/i18n/index.js';
 import {
   cardLabel,
   createCardElement,
+  createMiniCard,
   createSvgDefs,
   flashCard,
-  setCardSelected,
+  setCardState,
 } from '../src/ui/card.js';
 
 // Hebrew is the app's default locale; these assertions are about the English
@@ -134,10 +135,10 @@ describe('createCardElement', () => {
   });
 });
 
-describe('setCardSelected', () => {
+describe('setCardState', () => {
   it('signals selection through class, aria-pressed, a numbered badge and the label', () => {
     const element = createCardElement(document, makeCard(1, 1, 0, 1).id);
-    setCardSelected(element, 2);
+    setCardState(element, 2);
     expect(element.classList.contains('card--selected')).toBe(true);
     expect(element.getAttribute('aria-pressed')).toBe('true');
     expect(element.querySelector('.card__badge')?.textContent).toBe('2');
@@ -148,12 +149,51 @@ describe('setCardSelected', () => {
 
   it('clears every selection cue when deselected', () => {
     const element = createCardElement(document, 5);
-    setCardSelected(element, 1);
-    setCardSelected(element, 0);
+    setCardState(element, 1);
+    setCardState(element, 0);
     expect(element.classList.contains('card--selected')).toBe(false);
     expect(element.getAttribute('aria-pressed')).toBe('false');
     expect(element.querySelector('.card__badge')?.textContent).toBe('');
     expect(element.getAttribute('aria-label')).toBe(cardLabel(cardById(5)));
+  });
+
+  it('marks a hinted card with a class, a corner mark and the label', () => {
+    const element = createCardElement(document, makeCard(1, 1, 0, 1).id);
+    setCardState(element, 0, true);
+    expect(element.classList.contains('card--hinted')).toBe(true);
+    expect(element.querySelector('.card__hintMark')?.textContent).toBe('?');
+    expect(element.getAttribute('aria-label')).toBe('two striped red diamonds, marked by a hint');
+    // Not a selection: nothing about the pressed state changes.
+    expect(element.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('describes a card that is both hinted and selected', () => {
+    const element = createCardElement(document, makeCard(1, 1, 0, 1).id);
+    setCardState(element, 1, true);
+    expect(element.getAttribute('aria-label')).toBe(
+      'two striped red diamonds, selected, position 1 of 3, marked by a hint',
+    );
+  });
+
+  it('drops the hint cue again when the hint no longer applies', () => {
+    const element = createCardElement(document, 5);
+    setCardState(element, 0, true);
+    setCardState(element, 0, false);
+    expect(element.classList.contains('card--hinted')).toBe(false);
+    expect(element.querySelector('.card__hintMark')?.textContent).toBe('');
+    expect(element.getAttribute('aria-label')).toBe(cardLabel(cardById(5)));
+  });
+});
+
+describe('createMiniCard', () => {
+  it('renders a labelled, non-interactive card face', () => {
+    const element = createMiniCard(document, makeCard(1, 1, 0, 1).id);
+    expect(element.tagName).toBe('SPAN');
+    expect(element.getAttribute('role')).toBe('img');
+    expect(element.getAttribute('aria-label')).toBe('two striped red diamonds');
+    expect(element.querySelectorAll('.card__art path')).toHaveLength(2);
+    // Nothing focusable inside, so it never becomes a dead tab stop.
+    expect(element.querySelector('button')).toBeNull();
   });
 });
 

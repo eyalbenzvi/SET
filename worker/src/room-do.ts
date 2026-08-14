@@ -16,8 +16,8 @@ import {
   type ClientMessage,
   type Emission,
   type ErrorCode,
-  type SerializedRoom,
   type ServerMessage,
+  type StoredRoom,
 } from '@set/shared';
 
 const STORAGE_KEY = 'room';
@@ -64,7 +64,7 @@ export class GameRoomDO implements DurableObject {
   constructor(state: DurableObjectState, _env: RoomEnvBindings) {
     this.state = state;
     void this.state.blockConcurrencyWhile(async () => {
-      const stored = await this.state.storage.get<SerializedRoom>(STORAGE_KEY);
+      const stored = await this.state.storage.get<StoredRoom>(STORAGE_KEY);
       if (stored) this.room = GameRoom.deserialize(stored);
     });
   }
@@ -259,6 +259,12 @@ export class GameRoomDO implements DurableObject {
         return;
       case 'noSet':
         await this.deliver(room.noSet(playerId, message.boardVersion));
+        return;
+      case 'deal':
+        await this.deliver(room.voteDeal(playerId, message.want, message.boardVersion));
+        return;
+      case 'hint':
+        await this.deliver(room.hint(playerId, message.level, message.boardVersion));
         return;
       case 'rematch': {
         const result = room.rematch(playerId);

@@ -18,8 +18,17 @@
 
 export const MIN_COLUMNS = 2;
 export const MAX_COLUMNS = 6;
-/** Below this, cards stop being comfortable touch targets. */
-export const MIN_CARD_WIDTH = 62;
+/**
+ * Below this, cards stop being comfortable touch targets.
+ *
+ * 56px wide is 80px tall — comfortably above the 44px guidance — and the floor is
+ * deliberately this low because of what the alternative looks like. On a 360x640
+ * phone a 15-card board either fits at 60px per card or falls through to the
+ * scrolling fallback with 77px cards, two rows clipped against the header and
+ * action bar, and no way to see the whole board at once. In a game about scanning
+ * a board, smaller cards you can all see beat larger cards you have to hunt for.
+ */
+export const MIN_CARD_WIDTH = 56;
 /** Above this, cards look oversized on a wide desktop window. */
 export const MAX_CARD_WIDTH = 190;
 /** How much smaller an evenly-dividing layout may be and still win. */

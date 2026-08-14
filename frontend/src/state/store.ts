@@ -9,14 +9,19 @@
  */
 
 import {
+  HINT_DELAY_MS,
   MAX_NAME_LENGTH,
   ROOM_CODE_LENGTH,
   normalizeName,
   normalizeRoomCode,
   type CardId,
   type ClaimRejectedMessage,
+  type DealRejectedMessage,
   type ErrorCode,
   type GameEvent,
+  type HintLevel,
+  type HintRejectedMessage,
+  type HintRevealedMessage,
   type NoSetRejectedMessage,
   type PublicState,
   type ServerMessage,
@@ -59,6 +64,21 @@ export interface FeedEntry {
   tone: Tone;
 }
 
+/** The cards a hint marked, valid only for the board it was asked about. */
+export interface HintState {
+  level: HintLevel;
+  cards: CardId[];
+  boardVersion: number;
+}
+
+/** The set that was just taken, so everyone can see what they missed. */
+export interface LastSet {
+  id: number;
+  playerName: string;
+  cards: CardId[];
+  byMe: boolean;
+}
+
 /** What the fatal screen offers the player. */
 export type RecoveryAction = 'home' | 'retry' | 'reload';
 
@@ -85,6 +105,10 @@ export interface AppState {
   feedback: Feedback | null;
   /** Cooldown deadline translated into this browser's clock. */
   cooldownUntil: number;
+  /** The hint this player asked for, if it still applies to the board on screen. */
+  hint: HintState | null;
+  /** The most recent set anyone took, shown briefly to the whole table. */
+  lastSet: LastSet | null;
   fatal: FatalState | null;
   /** Latest text for the polite live region. */
   announcement: string;
@@ -105,6 +129,12 @@ export type Effect =
 const TOAST_TTL_MS = 3_800;
 const MAX_TOASTS = 3;
 const FEEDBACK_TTL_MS = 6_000;
+/**
+ * How long the set that was just taken stays on screen. Long enough to look at
+ * three cards and see why they matched, short enough that it is gone before the
+ * next set is found.
+ */
+const LAST_SET_TTL_MS = 7_000;
 
 export class Store {
   private state: AppState;
@@ -114,6 +144,7 @@ export class Store {
   private toastSeq = 0;
   private clockOffset = 0;
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastSetTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
   constructor() {
@@ -133,6 +164,8 @@ export class Store {
       feed: null,
       feedback: null,
       cooldownUntil: 0,
+      hint: null,
+      lastSet: null,
       fatal: null,
       announcement: '',
       settings: loadSettings(),
@@ -197,6 +230,41 @@ export class Store {
   cooldownSeconds(now = Date.now()): number {
     const remaining = this.state.cooldownUntil - now;
     return remaining > 0 ? Math.ceil(remaining / 1_000) : 0;
+  }
+
+  /** True when this player is one of those asking for three more cards. */
+  iWantMoreCards(): boolean {
+    const { room, meId } = this.state;
+    return room !== null && meId !== null && room.dealVotes.includes(meId);
+  }
+
+  /** How many players are asking for more cards, and how many are needed. */
+  dealProgress(): { votes: number; needed: number } {
+    const room = this.state.room;
+    if (!room) return { votes: 0, needed: 0 };
+    const needed = Math.max(room.players.filter((player) => player.connected).length, 1);
+    return { votes: room.dealVotes.length, needed };
+  }
+
+  /**
+   * Whole seconds until a hint level unlocks; 0 once it is available.
+   *
+   * The deadline is a server timestamp, so it is translated through the measured
+   * clock offset rather than trusting this device's clock to agree.
+   */
+  hintUnlockSeconds(level: HintLevel, now = Date.now()): number {
+    const room = this.state.room;
+    if (!room) return 0;
+    const availableAt = room.boardSince - this.clockOffset + HINT_DELAY_MS[level];
+    const remaining = availableAt - now;
+    return remaining > 0 ? Math.ceil(remaining / 1_000) : 0;
+  }
+
+  /** The hint cards, but only while they still describe the board on screen. */
+  activeHint(): HintState | null {
+    const { hint, room } = this.state;
+    if (!hint || !room) return null;
+    return hint.boardVersion === room.boardVersion ? hint : null;
   }
 
   /** Players ordered for the score strip: highest score first, then join order. */
@@ -395,6 +463,30 @@ export class Store {
     this.connection?.send({ t: 'noSet', boardVersion: room.boardVersion });
   }
 
+  /**
+   * Ask for three more cards, or take the request back — the same button both
+   * ways, so the player who asked can always change their mind.
+   *
+   * Deliberately allowed during a cooldown: this is a request to the table, not a
+   * move on the board, and the cards only appear once everyone agrees.
+   */
+  toggleMoreCards(): void {
+    const room = this.state.room;
+    if (room?.phase !== 'playing') return;
+    this.connection?.send({
+      t: 'deal',
+      want: !this.iWantMoreCards(),
+      boardVersion: room.boardVersion,
+    });
+  }
+
+  /** Ask the server for a hint. It answers only this player. */
+  requestHint(level: HintLevel): void {
+    const room = this.state.room;
+    if (room?.phase !== 'playing') return;
+    this.connection?.send({ t: 'hint', level, boardVersion: room.boardVersion });
+  }
+
   startGame(): void {
     this.connection?.send({ t: 'start' });
   }
@@ -418,6 +510,8 @@ export class Store {
       feed: null,
       feedback: null,
       cooldownUntil: 0,
+      hint: null,
+      lastSet: null,
       fatal: null,
       busy: null,
       homeMode: 'menu',
@@ -493,6 +587,15 @@ export class Store {
       case 'noSetRejected':
         this.handleNoSetRejected(message);
         return;
+      case 'hintRevealed':
+        this.handleHintRevealed(message);
+        return;
+      case 'hintRejected':
+        this.handleHintRejected(message);
+        return;
+      case 'dealRejected':
+        this.handleDealRejected(message);
+        return;
       case 'error':
         this.handleServerError(message.code, message.message, message.fatal);
         return;
@@ -512,7 +615,10 @@ export class Store {
     const selection = boardChanged ? [] : pruneSelection(this.state.selection, state.board);
     const me = state.players.find((player) => player.id === this.state.meId);
     const cooldownUntil = me?.cooldownUntil ? me.cooldownUntil - this.clockOffset : 0;
-    this.patch({ room: state, selection, cooldownUntil, busy: null });
+    // A hint describes one board. Once that board is gone the marks would point
+    // at cards that no longer belong to a set, so they go with it.
+    const hint = boardChanged ? null : this.state.hint;
+    this.patch({ room: state, selection, cooldownUntil, hint, busy: null });
   }
 
   private handleEvent(event: GameEvent): void {
@@ -521,6 +627,7 @@ export class Store {
       case 'setFound': {
         const text = mine ? t('feed.setFoundYou') : t('feed.setFound', { name: event.playerName });
         this.pushToast(text, 'good');
+        this.showLastSet(event.playerName, event.cards, mine);
         this.emit({ kind: 'accepted', cards: event.cards, byMe: mine });
         return;
       }
@@ -528,7 +635,39 @@ export class Store {
         if (!mine) this.pushToast(t('feed.invalidClaim', { name: event.playerName }), 'bad');
         return;
       case 'cardsAdded':
-        this.pushToast(t('feed.cardsAdded'), 'info');
+        this.pushToast(
+          event.reason === 'agreed' ? t('feed.cardsAddedAgreed') : t('feed.cardsAdded'),
+          'info',
+        );
+        return;
+      case 'dealVote': {
+        if (mine) {
+          this.setFeedback(
+            event.want
+              ? t('feed.dealAskedYou', { votes: event.votes, needed: event.needed })
+              : t('feed.dealWithdrewYou'),
+            'info',
+          );
+          return;
+        }
+        this.pushToast(
+          event.want
+            ? t('feed.dealAsked', {
+                name: event.playerName,
+                votes: event.votes,
+                needed: event.needed,
+              })
+            : t('feed.dealWithdrew', { name: event.playerName }),
+          'info',
+        );
+        return;
+      }
+      case 'dealLapsed':
+        this.pushToast(t('feed.dealLapsed'), 'info');
+        return;
+      case 'hintUsed':
+        // Everyone hears that a hint was taken, but never which cards it named.
+        if (!mine) this.pushToast(t('feed.hintUsed', { name: event.playerName }), 'info');
         return;
       case 'noSetRejected':
         if (!mine) this.pushToast(t('feed.noSetRejected', { name: event.playerName }), 'bad');
@@ -552,7 +691,7 @@ export class Store {
         // A phase change wipes stale messages so they cannot pile up on the next
         // screen and sit on top of its buttons.
         this.clearMessages();
-        this.patch({ selection: [], feedback: null });
+        this.patch({ selection: [], feedback: null, hint: null, lastSet: null });
         this.pushToast(t('feed.gameStarted'), 'good');
         return;
       case 'rematchWanted':
@@ -569,6 +708,8 @@ export class Store {
                 ? t('results.winnerYou')
                 : t('results.winner', { name: event.winnerNames[0] ?? '' }),
           selection: [],
+          hint: null,
+          lastSet: null,
         });
         return;
       }
@@ -634,6 +775,58 @@ export class Store {
     this.patch({ cooldownUntil, announcement: text });
   }
 
+  private handleHintRevealed(message: HintRevealedMessage): void {
+    this.patch({
+      hint: { level: message.level, cards: message.cards, boardVersion: message.boardVersion },
+    });
+    const text = message.level === 1 ? t('hint.revealedOne') : t('hint.revealedTwo');
+    this.setFeedback(text, 'info');
+    this.patch({ announcement: text });
+  }
+
+  private handleHintRejected(message: HintRejectedMessage): void {
+    const text =
+      message.reason === 'too_soon'
+        ? t('hint.tooSoon', {
+            seconds: Math.max(Math.ceil((message.availableAt - message.serverTime) / 1_000), 1),
+          })
+        : message.reason === 'no_set'
+          ? t('hint.noSet')
+          : message.reason === 'board_changed'
+            ? t('reject.boardChanged')
+            : t('reject.notPlaying');
+    this.setFeedback(text, 'info');
+    this.patch({ announcement: text });
+  }
+
+  private handleDealRejected(message: DealRejectedMessage): void {
+    const text =
+      message.reason === 'deck_empty'
+        ? t('deal.deckEmpty')
+        : message.reason === 'board_full'
+          ? t('deal.boardFull')
+          : message.reason === 'board_changed'
+            ? t('reject.boardChanged')
+            : t('reject.notPlaying');
+    this.setFeedback(text, 'info');
+    this.patch({ announcement: text });
+  }
+
+  /**
+   * Put the set that was just taken on screen for a few seconds.
+   *
+   * The cards are already sliding off the board by the time this runs, which is
+   * exactly the problem it solves: without it, a player who was looking elsewhere
+   * never finds out what the set was.
+   */
+  private showLastSet(playerName: string, cards: CardId[], byMe: boolean): void {
+    if (this.lastSetTimer !== null) clearTimeout(this.lastSetTimer);
+    this.patch({
+      lastSet: { id: ++this.toastSeq, playerName, cards: [...cards], byMe },
+    });
+    this.lastSetTimer = setTimeout(() => this.patch({ lastSet: null }), LAST_SET_TTL_MS);
+  }
+
   private handleServerError(code: ErrorCode, message: string, fatal: boolean): void {
     if (!fatal) {
       this.setFeedback(message, 'bad');
@@ -697,6 +890,8 @@ export class Store {
   private clearTimers(): void {
     if (this.feedbackTimer !== null) clearTimeout(this.feedbackTimer);
     this.feedbackTimer = null;
+    if (this.lastSetTimer !== null) clearTimeout(this.lastSetTimer);
+    this.lastSetTimer = null;
     for (const timer of this.toastTimers.values()) clearTimeout(timer);
     this.toastTimers.clear();
   }

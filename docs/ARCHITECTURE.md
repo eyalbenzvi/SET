@@ -37,10 +37,18 @@ exists:
 | `room.ts`     | `GameRoom` — the authoritative state machine.                |
 | `protocol.ts` | Wire types **and** the runtime validator for inbound frames. |
 
-`GameRoom` takes commands (`join`, `start`, `claim`, `noSet`, `rematch`,
-`leave`, `tick`) and returns a list of messages to deliver, each addressed to
-either everyone or one player. It reads the clock and randomness through an
-injected `RoomEnv`, so tests drive it with a fake clock and a seeded shuffle.
+`GameRoom` takes commands (`join`, `start`, `claim`, `noSet`, `voteDeal`, `hint`,
+`rematch`, `leave`, `tick`) and returns a list of messages to deliver, each
+addressed to either everyone or one player. It reads the clock and randomness
+through an injected `RoomEnv`, so tests drive it with a fake clock and a seeded
+shuffle — which is how the two time-based features are tested without waiting:
+the unanimous request for more cards lapses on a timer, and the two hint levels
+unlock on time spent on the current board.
+
+Both of those features key off one private helper, `bumpBoard()`. Anything that
+changes the position in front of the players goes through it, so the board
+version, the pending request for more cards and the hint clock can never
+disagree about which board is on the table.
 
 `GameRoomDO` (in `worker/src/room-do.ts`) is the only place that touches
 WebSockets, storage and alarms. It parses frames, enforces the per-socket rate

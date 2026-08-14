@@ -14,27 +14,37 @@
  *  - Cooldowns are per-player and are only applied to a player's *own* mistakes.
  *  - The game can never sit on a set-less board while the deck still has cards
  *    and no way forward: "No SET on board" always resolves that position.
+ *  - Extra cards are only dealt on the table's unanimous request, or when a
+ *    correct "No SET on board" call forces it.
+ *  - Hints unlock on time spent on the *current* board, so they cannot be farmed
+ *    by waiting once and then claiming repeatedly.
  */
 
 import { INITIAL_BOARD_SIZE, SET_SIZE, cardById, freshDeckIds, type CardId } from './cards.js';
 import {
+  DEAL_VOTE_TTL_MS,
+  HINT_DELAY_MS,
   INVALID_ACTION_COOLDOWN_MS,
+  MAX_BOARD_SIZE,
   MAX_PLAYERS,
   MIN_PLAYERS,
   PROTOCOL_VERSION,
   RECONNECT_GRACE_MS,
   ROOM_IDLE_TTL_MS,
   type ClaimRejectReason,
+  type DealRejectReason,
   type ErrorCode,
   type GameEvent,
   type GamePhase,
+  type HintLevel,
+  type HintRejectReason,
   type NoSetRejectReason,
   type PublicPlayer,
   type PublicState,
   type ServerMessage,
 } from './protocol.js';
 import { secureRandomHex } from './random.js';
-import { describeMismatchByIds, hasSet, isSetByIds } from './rules.js';
+import { describeMismatchByIds, findFirstSet, hasSet, isSetByIds } from './rules.js';
 import { cryptoRandom, shuffled, type RandomSource } from './shuffle.js';
 
 /** Where a produced message must be delivered. */
@@ -108,7 +118,7 @@ export type JoinOutcome =
 
 export interface SerializedRoom {
   /** Storage schema version, for forward-compatible migrations. */
-  s: 1;
+  s: 2;
   code: string;
   phase: GamePhase;
   players: PlayerRecord[];
@@ -118,7 +128,19 @@ export interface SerializedRoom {
   setsFound: number;
   seatCounter: number;
   emptySince: number | null;
+  dealVotes: string[];
+  dealVoteExpiresAt: number;
+  boardSince: number;
 }
+
+/**
+ * Anything the Durable Object's storage may hold. Version 1 predates the shared
+ * "deal more cards" vote and the hint clock, so those fields are absent; they
+ * are restored with safe defaults rather than failing to load a live room.
+ */
+export type StoredRoom =
+  | SerializedRoom
+  | (Omit<SerializedRoom, 's' | 'dealVotes' | 'dealVoteExpiresAt' | 'boardSince'> & { s: 1 });
 
 /** Player-visible copy for messages that must not leak the token. */
 function publicPlayer(player: PlayerRecord, hostId: string | null): PublicPlayer {
@@ -147,11 +169,18 @@ export class GameRoom {
   private seatCounter = 0;
   /** When the room last became empty, for idle cleanup. */
   private emptySince: number | null = null;
+  /** Players currently asking for three more cards. Cleared on any board change. */
+  private dealVotes: string[] = [];
+  /** When the open request for more cards lapses; 0 when nobody is asking. */
+  private dealVoteExpiresAt = 0;
+  /** When the current board came into being — the clock the hints count from. */
+  private boardSince = 0;
 
   constructor(code: string, env: RoomEnv = defaultRoomEnv()) {
     this.code = code;
     this.env = env;
     this.emptySince = env.now();
+    this.boardSince = env.now();
   }
 
   /* ---------------------------------------------------------------- *
@@ -212,25 +241,41 @@ export class GameRoom {
       serverTime: this.env.now(),
       minPlayers: MIN_PLAYERS,
       maxPlayers: MAX_PLAYERS,
+      dealVotes: this.dealVotes.slice(),
+      dealVoteExpiresAt: this.dealVoteExpiresAt,
+      boardSince: this.boardSince,
     };
   }
 
+  /** How many players must agree before three more cards are dealt. */
+  dealVotesNeeded(): number {
+    return Math.max(this.connectedCount(), 1);
+  }
+
+  /** True while more cards could legally be dealt onto this board. */
+  canDealMore(): boolean {
+    return (
+      this.phase === 'playing' &&
+      this.deck.length >= SET_SIZE &&
+      this.board.length + SET_SIZE <= MAX_BOARD_SIZE
+    );
+  }
+
   /**
-   * The next moment at which `tick()` has work to do (reconnect grace expiry, or
-   * idle-room cleanup), or `null` when no timer is needed.
+   * The next moment at which `tick()` has work to do (reconnect grace expiry, a
+   * lapsing request for more cards, or idle-room cleanup), or `null` when no
+   * timer is needed.
    */
   nextTimerAt(): number | null {
     let earliest: number | null = null;
-    for (const player of this.players) {
-      if (player.disconnectedAt !== null) {
-        const at = player.disconnectedAt + RECONNECT_GRACE_MS;
-        if (earliest === null || at < earliest) earliest = at;
-      }
-    }
-    if (this.emptySince !== null) {
-      const at = this.emptySince + ROOM_IDLE_TTL_MS;
+    const consider = (at: number): void => {
       if (earliest === null || at < earliest) earliest = at;
+    };
+    for (const player of this.players) {
+      if (player.disconnectedAt !== null) consider(player.disconnectedAt + RECONNECT_GRACE_MS);
     }
+    if (this.emptySince !== null) consider(this.emptySince + ROOM_IDLE_TTL_MS);
+    if (this.dealVoteExpiresAt > 0) consider(this.dealVoteExpiresAt);
     return earliest;
   }
 
@@ -348,6 +393,7 @@ export class GameRoom {
       ),
     ];
     emissions.push(...this.reassignHostIfNeeded());
+    emissions.push(...this.settleDealVotes());
     if (this.connectedCount() === 0) this.emptySince = this.env.now();
     return emissions;
   }
@@ -361,27 +407,44 @@ export class GameRoom {
       toAll(this.eventMessage({ k: 'playerLeft', playerId: player.id, playerName: player.name })),
     ];
     emissions.push(...this.reassignHostIfNeeded());
+    emissions.push(...this.settleDealVotes());
     if (this.connectedCount() === 0) this.emptySince = this.env.now();
     return emissions;
   }
 
   /**
-   * Advance time-based state: reclaim seats whose grace period has elapsed.
+   * Advance time-based state: reclaim seats whose grace period has elapsed, and
+   * drop a request for more cards that the table never answered.
    * Called from the Durable Object alarm; safe to call at any time.
    */
   tick(): Emission[] {
     const now = this.env.now();
+    const emissions: Emission[] = [];
+
     const expired = this.players.filter(
       (p) => p.disconnectedAt !== null && now - p.disconnectedAt >= RECONNECT_GRACE_MS,
     );
-    if (expired.length === 0) return [];
-    const expiredIds = new Set(expired.map((p) => p.id));
-    this.players = this.players.filter((p) => !expiredIds.has(p.id));
-    const emissions: Emission[] = expired.map((p) =>
-      toAll(this.eventMessage({ k: 'playerLeft', playerId: p.id, playerName: p.name })),
-    );
-    emissions.push(...this.reassignHostIfNeeded());
-    if (this.connectedCount() === 0 && this.emptySince === null) this.emptySince = now;
+    if (expired.length > 0) {
+      const expiredIds = new Set(expired.map((p) => p.id));
+      this.players = this.players.filter((p) => !expiredIds.has(p.id));
+      for (const player of expired) {
+        emissions.push(
+          toAll(
+            this.eventMessage({ k: 'playerLeft', playerId: player.id, playerName: player.name }),
+          ),
+        );
+      }
+      emissions.push(...this.reassignHostIfNeeded());
+      if (this.connectedCount() === 0 && this.emptySince === null) this.emptySince = now;
+    }
+
+    if (this.dealVoteExpiresAt > 0 && now >= this.dealVoteExpiresAt) {
+      this.clearDealVotes();
+      emissions.push(toAll(this.eventMessage({ k: 'dealLapsed' })));
+    } else if (expired.length > 0) {
+      // Losing a player can complete a request the rest of the table already made.
+      emissions.push(...this.settleDealVotes());
+    }
     return emissions;
   }
 
@@ -545,21 +608,123 @@ export class GameRoom {
     if (hasSet(this.board)) return reject('set_exists', true);
 
     if (this.deck.length >= SET_SIZE) {
-      this.board.push(...this.draw(SET_SIZE));
-      this.boardVersion += 1;
+      // No cap check here, and none is needed: a correct "no SET" call cannot
+      // happen on a 21-card board, because 21 face-up cards always contain one.
+      return this.dealMore(player, 'noSet');
+    }
+    // Correct call and nothing left to deal: the game is over.
+    return this.finishGame();
+  }
+
+  /**
+   * Ask for (or stop asking for) three more cards on top of the current board.
+   *
+   * This is the only way to grow the board while a SET is still findable, and it
+   * takes the whole table: every connected player has to be asking. That keeps it
+   * from becoming a way for one stuck player to wreck a position someone else can
+   * already see, while still giving a table that is collectively stuck a way out
+   * that does not cost anybody a cooldown.
+   *
+   * The request lapses on its own after `DEAL_VOTE_TTL_MS`, and any board change
+   * cancels it, so a forgotten tap never deals cards into a different position.
+   */
+  voteDeal(playerId: string, want: boolean, boardVersion: number): Emission[] {
+    const player = this.findPlayer(playerId);
+    if (!player) return [];
+
+    const reject = (reason: DealRejectReason): Emission[] => [
+      toPlayer(playerId, { t: 'dealRejected', reason }),
+    ];
+
+    if (this.phase !== 'playing') return reject('not_playing');
+    if (boardVersion !== this.boardVersion) return reject('board_changed');
+
+    if (!want) {
+      if (!this.dealVotes.includes(playerId)) return [];
+      this.dealVotes = this.dealVotes.filter((id) => id !== playerId);
+      if (this.dealVotes.length === 0) this.dealVoteExpiresAt = 0;
       return [
         toAll(
           this.eventMessage({
-            k: 'cardsAdded',
-            count: SET_SIZE,
+            k: 'dealVote',
             playerId: player.id,
             playerName: player.name,
+            want: false,
+            votes: this.dealVotes.length,
+            needed: this.dealVotesNeeded(),
           }),
         ),
       ];
     }
-    // Correct call and nothing left to deal: the game is over.
-    return this.finishGame();
+
+    if (this.deck.length < SET_SIZE) return reject('deck_empty');
+    if (this.board.length + SET_SIZE > MAX_BOARD_SIZE) return reject('board_full');
+    if (this.dealVotes.includes(playerId)) return [];
+
+    this.dealVotes.push(playerId);
+    if (this.dealVoteExpiresAt === 0) this.dealVoteExpiresAt = this.env.now() + DEAL_VOTE_TTL_MS;
+
+    if (this.everyoneWantsMore()) return this.dealMore(player, 'agreed');
+    return [
+      toAll(
+        this.eventMessage({
+          k: 'dealVote',
+          playerId: player.id,
+          playerName: player.name,
+          want: true,
+          votes: this.dealVotes.length,
+          needed: this.dealVotesNeeded(),
+        }),
+      ),
+    ];
+  }
+
+  /**
+   * Reveal part of a real SET to one player.
+   *
+   * Level 1 marks a single card, which narrows the search without giving the
+   * answer. Level 2 marks two, which determines the third completely — that is
+   * why it takes twice as long to unlock. The clock runs on the current board, so
+   * it is time actually spent stuck, and it restarts whenever the board changes.
+   *
+   * The reply goes only to the player who asked; everyone else just learns that a
+   * hint was taken, never which cards it named.
+   */
+  hint(playerId: string, level: HintLevel, boardVersion: number): Emission[] {
+    const now = this.env.now();
+    const player = this.findPlayer(playerId);
+    if (!player) return [];
+
+    const availableAt = this.boardSince + HINT_DELAY_MS[level];
+    const reject = (reason: HintRejectReason): Emission[] => [
+      toPlayer(playerId, { t: 'hintRejected', reason, availableAt, serverTime: now }),
+    ];
+
+    if (this.phase !== 'playing') return reject('not_playing');
+    if (boardVersion !== this.boardVersion) return reject('board_changed');
+    if (now < availableAt) return reject('too_soon');
+
+    const set = findFirstSet(this.board);
+    // Nothing to point at. Saying so is not a leak — it is exactly what the
+    // "No SET on board" button is for, and the player learns no card from it.
+    if (!set) return reject('no_set');
+
+    return [
+      toPlayer(playerId, {
+        t: 'hintRevealed',
+        level,
+        cards: set.slice(0, level),
+        boardVersion: this.boardVersion,
+      }),
+      toAll(
+        this.eventMessage({
+          k: 'hintUsed',
+          playerId: player.id,
+          playerName: player.name,
+          level,
+        }),
+      ),
+    ];
   }
 
   /* ---------------------------------------------------------------- *
@@ -568,7 +733,7 @@ export class GameRoom {
 
   serialize(): SerializedRoom {
     return {
-      s: 1,
+      s: 2,
       code: this.code,
       phase: this.phase,
       players: this.players.map((p) => ({ ...p })),
@@ -578,10 +743,13 @@ export class GameRoom {
       setsFound: this.setsFound,
       seatCounter: this.seatCounter,
       emptySince: this.emptySince,
+      dealVotes: this.dealVotes.slice(),
+      dealVoteExpiresAt: this.dealVoteExpiresAt,
+      boardSince: this.boardSince,
     };
   }
 
-  static deserialize(data: SerializedRoom, env: RoomEnv = defaultRoomEnv()): GameRoom {
+  static deserialize(data: StoredRoom, env: RoomEnv = defaultRoomEnv()): GameRoom {
     const room = new GameRoom(data.code, env);
     room.phase = data.phase;
     // A restored room has no live sockets: everyone starts inside their grace window.
@@ -597,6 +765,16 @@ export class GameRoom {
     room.setsFound = data.setsFound;
     room.seatCounter = data.seatCounter;
     room.emptySince = data.emptySince ?? now;
+    if (data.s === 2) {
+      room.dealVotes = data.dealVotes.slice();
+      room.dealVoteExpiresAt = data.dealVoteExpiresAt;
+      room.boardSince = data.boardSince;
+    } else {
+      // A v1 room predates both features. Nobody is asking for cards, and the
+      // hint clock restarts now rather than unlocking a hint the moment the room
+      // comes back.
+      room.boardSince = now;
+    }
     room.hostId = null;
     room.reassignHostIfNeeded();
     return room;
@@ -654,10 +832,71 @@ export class GameRoom {
     return this.deck.splice(0, count);
   }
 
+  /**
+   * Record that the position in front of the players has changed.
+   *
+   * Everything that keys off "this board" resets here, in one place: stale claims
+   * are rejected by the version, a pending request for more cards is cancelled
+   * because it was made about a different board, and the hint clock starts over.
+   */
+  private bumpBoard(): void {
+    this.boardVersion += 1;
+    this.boardSince = this.env.now();
+    this.clearDealVotes();
+  }
+
+  private clearDealVotes(): void {
+    this.dealVotes = [];
+    this.dealVoteExpiresAt = 0;
+  }
+
+  /** True when every connected player is asking for more cards. */
+  private everyoneWantsMore(): boolean {
+    const connected = this.players.filter((p) => p.connected);
+    if (connected.length === 0) return false;
+    return connected.every((p) => this.dealVotes.includes(p.id));
+  }
+
+  /**
+   * Re-evaluate an open request after the membership changed. Votes from players
+   * who are no longer here are dropped, and if that leaves the remaining table
+   * unanimous, the cards go out — otherwise a player leaving would freeze the
+   * request until it lapsed.
+   */
+  private settleDealVotes(): Emission[] {
+    if (this.dealVotes.length === 0) return [];
+    const present = new Set(this.players.filter((p) => p.connected).map((p) => p.id));
+    this.dealVotes = this.dealVotes.filter((id) => present.has(id));
+    if (this.dealVotes.length === 0) {
+      this.dealVoteExpiresAt = 0;
+      return [];
+    }
+    if (!this.everyoneWantsMore() || !this.canDealMore()) return [];
+    const player = this.findPlayer(this.dealVotes[0]!);
+    return player ? this.dealMore(player, 'agreed') : [];
+  }
+
+  /** Put three more cards on the table and announce why. */
+  private dealMore(player: PlayerRecord, reason: 'noSet' | 'agreed'): Emission[] {
+    this.board.push(...this.draw(SET_SIZE));
+    this.bumpBoard();
+    return [
+      toAll(
+        this.eventMessage({
+          k: 'cardsAdded',
+          count: SET_SIZE,
+          playerId: player.id,
+          playerName: player.name,
+          reason,
+        }),
+      ),
+    ];
+  }
+
   private beginGame(): void {
     this.deck = shuffled(freshDeckIds(), this.env.random);
     this.board = this.draw(INITIAL_BOARD_SIZE);
-    this.boardVersion += 1;
+    this.bumpBoard();
     this.setsFound = 0;
     this.phase = 'playing';
     for (const player of this.players) {
@@ -683,7 +922,7 @@ export class GameRoom {
     } else {
       for (const slot of ordered.slice().reverse()) this.board.splice(slot, 1);
     }
-    this.boardVersion += 1;
+    this.bumpBoard();
   }
 
   /** End the game when the deck is empty and no set remains on the board. */
@@ -726,6 +965,7 @@ export function checkRoomInvariants(room: GameRoom): string[] {
   if (room.getPhase() === 'playing') {
     if (board.length + room.getDeckRemaining() > 81) problems.push('more cards in play than exist');
     if (board.length % 3 !== 0) problems.push('board size is not a multiple of three');
+    if (board.length > MAX_BOARD_SIZE) problems.push('board grew past the cap');
     if (room.getDeckRemaining() > 0 && board.length < INITIAL_BOARD_SIZE) {
       problems.push('board is under-filled while the deck still has cards');
     }

@@ -6,6 +6,7 @@
  * not a mock. `globalSetup.ts` starts and stops the server.
  */
 
+import { PROTOCOL_VERSION } from '@set/shared';
 import type { ClientMessage, GameEvent, PublicState, ServerMessage } from '@set/shared';
 
 export const BASE_URL = process.env['SET_TEST_BASE_URL'] ?? 'http://127.0.0.1:8788';
@@ -70,8 +71,14 @@ export class TestClient {
   /** Say hello and wait for the welcome (or a fatal error). */
   async hello(name: string, resume?: { playerId: string; token: string }): Promise<ServerMessage> {
     const message: ClientMessage = resume
-      ? { t: 'hello', v: 1, name, playerId: resume.playerId, token: resume.token }
-      : { t: 'hello', v: 1, name };
+      ? {
+          t: 'hello',
+          v: PROTOCOL_VERSION,
+          name,
+          playerId: resume.playerId,
+          token: resume.token,
+        }
+      : { t: 'hello', v: PROTOCOL_VERSION, name };
     this.send(message);
     const reply = await this.waitFor((m) => m.t === 'welcome' || m.t === 'error');
     if (reply.t === 'welcome') {
