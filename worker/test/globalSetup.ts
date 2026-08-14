@@ -35,7 +35,14 @@ export async function setup(): Promise<void> {
   child = spawn(
     'npx',
     ['wrangler', 'dev', '--port', String(PORT), '--ip', '127.0.0.1', '--log-level', 'warn'],
-    { cwd: new URL('..', import.meta.url).pathname, stdio: ['ignore', 'pipe', 'pipe'] },
+    {
+      cwd: new URL('..', import.meta.url).pathname,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // Own process group: wrangler starts workerd as a child, and signalling the
+      // group is what guarantees the runtime dies with the test run instead of
+      // leaking and holding the port.
+      detached: true,
+    },
   );
   child.stdout?.on('data', () => {
     /* discard: wrangler is chatty and the suite asserts on HTTP, not logs */
@@ -52,7 +59,22 @@ export async function setup(): Promise<void> {
 
 export async function teardown(): Promise<void> {
   if (child?.exitCode !== null) return;
-  child.kill('SIGTERM');
+  const pid = child.pid;
+  signalGroup(pid, 'SIGTERM');
   await Promise.race([once(child, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-  if (child.exitCode === null) child.kill('SIGKILL');
+  if (child.exitCode === null) signalGroup(pid, 'SIGKILL');
+}
+
+/** Signal the whole process group, falling back to the direct child. */
+function signalGroup(pid: number | undefined, signal: NodeJS.Signals): void {
+  if (pid === undefined) return;
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      /* already gone */
+    }
+  }
 }

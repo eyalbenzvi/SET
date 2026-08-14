@@ -37,11 +37,20 @@ export class GameScreen {
   private layoutKey = '';
   private lastFeedId = -1;
   private lastColorAssist: boolean;
+  /** Set by the first tap on Leave; a second tap within the window commits. */
+  private leaveArmed = false;
+  private leaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly leaveButton: HTMLButtonElement;
 
   constructor(private readonly store: Store) {
     this.lastColorAssist = store.getState().settings.colorAssist;
 
-    this.scores = el('div', { class: 'scores', attrs: { 'data-testid': 'scores' } });
+    this.scores = el('div', {
+      class: 'scores',
+      // A labelled list, so a screen reader can walk the scores instead of
+      // meeting an unlabelled row of divs.
+      attrs: { 'data-testid': 'scores', role: 'list', 'aria-label': t('game.scoresLabel') },
+    });
     this.deckCounter = el('span', { class: 'meter__value' });
     this.setsCounter = el('span', { class: 'meter__value' });
     this.board = el('div', {
@@ -66,6 +75,10 @@ export class GameScreen {
       class: 'btn--noset',
       attrs: { 'data-testid': 'no-set' },
     });
+    this.leaveButton = button(t('game.leave'), 'ghost', () => this.onLeaveTapped(), {
+      class: 'btn--tiny',
+      attrs: { 'data-testid': 'leave-game' },
+    });
 
     this.root = el('div', {
       class: 'screen screen--game',
@@ -79,16 +92,27 @@ export class GameScreen {
               children: [
                 el('span', {
                   class: 'meter',
-                  children: [el('span', { class: 'meter__label', text: '🂠' }), this.deckCounter],
+                  children: [
+                    el('span', {
+                      class: 'meter__label',
+                      text: '🂠',
+                      attrs: { 'aria-hidden': 'true' },
+                    }),
+                    this.deckCounter,
+                  ],
                 }),
                 el('span', {
                   class: 'meter',
-                  children: [el('span', { class: 'meter__label', text: '✓' }), this.setsCounter],
+                  children: [
+                    el('span', {
+                      class: 'meter__label',
+                      text: '✓',
+                      attrs: { 'aria-hidden': 'true' },
+                    }),
+                    this.setsCounter,
+                  ],
                 }),
-                button(t('game.leave'), 'ghost', () => this.store.leaveRoom(), {
-                  class: 'btn--tiny',
-                  attrs: { 'data-testid': 'leave-game' },
-                }),
+                this.leaveButton,
               ],
             }),
             this.feed,
@@ -131,6 +155,7 @@ export class GameScreen {
       if (this.cooldownTimer !== null) clearInterval(this.cooldownTimer);
       this.cooldownTimer = null;
       observer?.disconnect();
+      if (this.leaveTimer !== null) clearTimeout(this.leaveTimer);
       globalThis.removeEventListener('resize', onResize);
       globalThis.removeEventListener('orientationchange', onResize);
     };
@@ -160,16 +185,38 @@ export class GameScreen {
         if (player.cooldownUntil > room.serverTime) classes.push('scoreChip--cooling');
         return el('div', {
           class: classes.join(' '),
-          attrs: { 'data-player-name': player.name, 'data-testid': 'score-chip' },
+          attrs: {
+            'data-player-name': player.name,
+            'data-testid': 'score-chip',
+            role: 'listitem',
+            'aria-label': t('game.playerScore', { name: player.name, score: player.score }),
+          },
           children: [
-            el('span', { class: 'scoreChip__name', text: player.name }),
-            el('span', { class: 'scoreChip__score', text: String(player.score) }),
+            el('span', {
+              class: 'scoreChip__name',
+              text: player.name,
+              attrs: { 'aria-hidden': 'true' },
+            }),
+            el('span', {
+              class: 'scoreChip__score',
+              text: String(player.score),
+              attrs: { 'aria-hidden': 'true' },
+            }),
           ],
         });
       }),
     );
+    // Visible text is terse; the accessible name spells the meaning out.
     this.deckCounter.textContent = t('game.deckLeft', { count: room.deckRemaining });
+    this.deckCounter.setAttribute(
+      'aria-label',
+      t('game.deckLeftLabel', { count: room.deckRemaining }),
+    );
     this.setsCounter.textContent = t('game.setsFound', { count: room.setsFound });
+    this.setsCounter.setAttribute(
+      'aria-label',
+      t('game.setsFoundLabel', { count: room.setsFound }),
+    );
   }
 
   /**
@@ -247,7 +294,6 @@ export class GameScreen {
       : selected === SET_SIZE
         ? t('game.claim')
         : t('game.claimSelected', { count: selected });
-    this.root.classList.toggle('screen--cooling', cooling);
 
     const feedback = state.feedback;
     this.feedback.textContent = feedback?.text ?? (cooling ? '' : t('game.selectThree'));
@@ -351,6 +397,31 @@ export class GameScreen {
   /* ---------------------------------------------------------------- *
    * Interaction
    * ---------------------------------------------------------------- */
+
+  /**
+   * Leaving mid-game is destructive and the control sits in a tight header, so it
+   * takes two taps: the first arms it and relabels the button, and it disarms
+   * itself after a few seconds.
+   */
+  private onLeaveTapped(): void {
+    if (this.leaveArmed) {
+      this.store.leaveRoom();
+      return;
+    }
+    this.leaveArmed = true;
+    this.leaveButton.textContent = t('game.leaveConfirm');
+    this.leaveButton.classList.add('btn--armed');
+    if (this.leaveTimer !== null) clearTimeout(this.leaveTimer);
+    this.leaveTimer = setTimeout(() => this.disarmLeave(), 4_000);
+  }
+
+  private disarmLeave(): void {
+    this.leaveArmed = false;
+    this.leaveButton.textContent = t('game.leave');
+    this.leaveButton.classList.remove('btn--armed');
+    if (this.leaveTimer !== null) clearTimeout(this.leaveTimer);
+    this.leaveTimer = null;
+  }
 
   private onBoardClick(event: MouseEvent): void {
     const target = (event.target as HTMLElement | null)?.closest<HTMLElement>('.card');

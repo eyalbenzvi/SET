@@ -18,11 +18,6 @@ function webCrypto(): RandomValuesCrypto | undefined {
     : undefined;
 }
 
-/** True when cryptographic randomness is available on this runtime. */
-export function hasSecureRandom(): boolean {
-  return webCrypto() !== undefined;
-}
-
 /**
  * `length` cryptographically strong random bytes.
  * Throws when no secure source exists, so callers never silently downgrade.

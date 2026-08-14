@@ -8,7 +8,6 @@ import {
   FILL_VALUES,
   SHAPE_VALUES,
   cardById,
-  describeCard,
   freshDeckIds,
   isCardId,
   makeCard,
@@ -89,9 +88,7 @@ describe('deck generation', () => {
     expect(ids[80]).toBe(80);
   });
 
-  it('describes cards in readable English', () => {
-    expect(describeCard(makeCard(0, 1, 0, 2))).toBe('one solid red diamond');
-    expect(describeCard(makeCard(2, 2, 2, 0))).toBe('three open purple squiggles');
+  it('names the attribute values in a fixed, documented order', () => {
     expect(COUNT_VALUES).toEqual(['one', 'two', 'three']);
     expect(SHAPE_VALUES).toEqual(['oval', 'diamond', 'squiggle']);
     expect(COLOR_VALUES).toEqual(['red', 'green', 'purple']);

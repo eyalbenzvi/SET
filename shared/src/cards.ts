@@ -25,11 +25,6 @@ export const COLOR_VALUES = ['red', 'green', 'purple'] as const;
 /** Symbol shading. */
 export const FILL_VALUES = ['open', 'striped', 'solid'] as const;
 
-export type CountName = (typeof COUNT_VALUES)[number];
-export type ShapeName = (typeof SHAPE_VALUES)[number];
-export type ColorName = (typeof COLOR_VALUES)[number];
-export type FillName = (typeof FILL_VALUES)[number];
-
 /** Human-readable value names per attribute, indexed by `AttrValue`. */
 export const ATTRIBUTE_VALUE_NAMES = {
   count: COUNT_VALUES,
@@ -49,7 +44,6 @@ export const ATTRIBUTE_VALUE_NAMES = {
 export type CardId = number;
 
 export const DECK_SIZE = 81;
-export const VALUES_PER_ATTRIBUTE = 3;
 export const SET_SIZE = 3;
 /** Number of cards dealt to the board at the start of a game. */
 export const INITIAL_BOARD_SIZE = 12;
@@ -98,20 +92,6 @@ export function cardById(id: CardId): Card {
   const card = DECK[id];
   if (!card) throw new RangeError(`Invalid card id: ${String(id)}`);
   return card;
-}
-
-/** Read one attribute of a card. */
-export function attrOf(card: Card, attribute: Attribute): AttrValue {
-  return card[attribute];
-}
-
-/** A stable, human/screen-reader friendly description, e.g. `two striped red diamond`. */
-export function describeCard(card: Card): string {
-  const count = COUNT_VALUES[card.count];
-  const fill = FILL_VALUES[card.fill];
-  const color = COLOR_VALUES[card.color];
-  const shape = SHAPE_VALUES[card.shape];
-  return `${count} ${fill} ${color} ${shape}${card.count === 0 ? '' : 's'}`;
 }
 
 /** All card ids in canonical order — a fresh, unshuffled deck. */

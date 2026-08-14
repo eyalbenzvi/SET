@@ -58,10 +58,6 @@ export function button(
   return node;
 }
 
-export function clear(node: Element): void {
-  node.replaceChildren();
-}
-
 /** Replace a container's children in one operation. */
 export function render(container: Element, ...children: (Node | null | undefined)[]): void {
   container.replaceChildren(...children.filter((child): child is Node => Boolean(child)));

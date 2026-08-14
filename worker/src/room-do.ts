@@ -322,10 +322,10 @@ export class GameRoomDO implements DurableObject {
 
   private broadcast(message: ServerMessage): void {
     const payload = JSON.stringify(message);
-    for (const socket of this.sockets.keys()) {
-      const meta = this.sockets.get(socket);
+    // Snapshot first: a send can fail and trigger cleanup mid-broadcast.
+    for (const [socket, meta] of [...this.sockets]) {
       // Sockets that have not said hello yet are not part of the room.
-      if (!meta?.playerId) continue;
+      if (!meta.playerId) continue;
       this.rawSend(socket, payload);
     }
   }
@@ -342,8 +342,10 @@ export class GameRoomDO implements DurableObject {
     try {
       socket.send(payload);
     } catch {
-      // The socket is already gone; the close handler will clean it up.
-      this.sockets.delete(socket);
+      // The socket is already gone. Deliberately *not* removed from `sockets`
+      // here: `onClose` needs to still find its metadata so it can mark the
+      // player disconnected. Dropping it now would leave the seat looking
+      // permanently connected.
     }
   }
 

@@ -8,10 +8,15 @@
 
 .screen--game {
   display: grid;
+  /* `minmax(0, 1fr)` on the column is load-bearing: without the 0 minimum, a
+     wide score strip (four or more players) sizes the column to its content and
+     the whole page scrolls sideways instead of the strip scrolling itself. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   /* Height comes from the pinned `.app` (see `body.is-playing` in base.css), so
      the rows resolve against a definite height and the board row can shrink. */
   min-height: 0;
+  min-width: 0;
 }
 
 /* ---------------------------------------------------------------- Header */
@@ -19,6 +24,7 @@
 .gameHeader {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   gap: 6px;
   padding: calc(8px + var(--safe-top)) 10px 8px;
   background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
@@ -26,9 +32,12 @@
   border-bottom: 1px solid var(--line);
 }
 
+/* Many players scroll horizontally *inside* the strip; the page never does. */
 .scores {
   display: flex;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
   scrollbar-width: none;
   padding-bottom: 2px;
@@ -83,6 +92,7 @@
 .meters {
   display: flex;
   align-items: center;
+  min-width: 0;
   gap: 12px;
   font-size: 0.75rem;
   color: var(--ink-faint);
@@ -105,6 +115,13 @@
 
 .meters .btn--tiny {
   margin-inline-start: auto;
+}
+
+/* Armed state of the two-step leave control. */
+.btn--armed {
+  background: var(--bad-soft);
+  color: var(--bad);
+  font-weight: 750;
 }
 
 /* ---------------------------------------------------------------- Board */

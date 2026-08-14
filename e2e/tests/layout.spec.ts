@@ -256,6 +256,49 @@ test.describe('keyboard and screen-reader support', () => {
     await closePlayers(maya, david);
   });
 
+  test('the score strip and deck meters carry accessible names', async ({ browser }) => {
+    const maya = await newPlayer(browser, 'Maya');
+    const david = await newPlayer(browser, 'David');
+    const code = await createRoom(maya);
+    await joinByLink(david, code);
+    await startGame(maya, david);
+
+    const scores = maya.page.getByTestId('scores');
+    await expect(scores).toHaveAttribute('role', 'list');
+    await expect(scores).toHaveAttribute('aria-label', /score/i);
+    await expect(maya.page.getByTestId('score-chip').first()).toHaveAttribute(
+      'aria-label',
+      /Maya: \d+/,
+    );
+    // The decorative glyphs are hidden and the numbers are spelled out.
+    await expect(maya.page.locator('.meter__label').first()).toHaveAttribute('aria-hidden', 'true');
+    await expect(maya.page.locator('.meter__value').first()).toHaveAttribute(
+      'aria-label',
+      /cards left in the deck/i,
+    );
+
+    await closePlayers(maya, david);
+  });
+
+  test('leaving a live game needs two taps and disarms itself', async ({ browser }) => {
+    const maya = await newPlayer(browser, 'Maya');
+    const david = await newPlayer(browser, 'David');
+    const code = await createRoom(maya);
+    await joinByLink(david, code);
+    await startGame(maya, david);
+
+    const leave = maya.page.getByTestId('leave-game');
+    await leave.click();
+    await expect(leave).toContainText(/tap again/i);
+    // Still in the game after one tap.
+    await expect(maya.page.getByTestId('board')).toBeVisible();
+    // It disarms on its own, so a stray tap later cannot leave either.
+    await expect(leave).toContainText(/leave game/i, { timeout: 10_000 });
+    await expect(maya.page.getByTestId('board')).toBeVisible();
+
+    await closePlayers(maya, david);
+  });
+
   test('every interactive control has an accessible name', async ({ browser }) => {
     const maya = await newPlayer(browser, 'Maya');
     const david = await newPlayer(browser, 'David');

@@ -18,16 +18,14 @@ const LOCALES = {
 
 export type Locale = keyof typeof LOCALES;
 
-export const AVAILABLE_LOCALES = Object.keys(LOCALES) as Locale[];
-
 let current: Locale = 'en';
 
+/**
+ * Switch locale. The extension point for adding a language: register the
+ * dictionary in `LOCALES` above, call this once at start-up, and re-render.
+ */
 export function setLocale(locale: Locale): void {
   current = locale;
-}
-
-export function getLocale(): Locale {
-  return current;
 }
 
 /** Text direction of the active locale, for `<html dir>`. */

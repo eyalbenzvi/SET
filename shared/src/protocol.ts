@@ -11,7 +11,7 @@
  * never trusted for input coming off a socket.
  */
 
-import { DECK_SIZE, SET_SIZE, isCardId, type CardId } from './cards.js';
+import { SET_SIZE, isCardId, type CardId } from './cards.js';
 import type { AttributeMismatch } from './rules.js';
 
 export const PROTOCOL_VERSION = 1;
@@ -144,8 +144,6 @@ export type ClientMessage =
   | RematchMessage
   | LeaveMessage
   | PingMessage;
-
-export type ClientMessageType = ClientMessage['t'];
 
 /* ------------------------------------------------------------------ *
  * Server -> client
@@ -350,6 +348,3 @@ export function parseClientMessage(raw: unknown): ParseResult<ClientMessage> {
       return { ok: false, error: `unknown message type: ${String(type)}` };
   }
 }
-
-/** Sanity bound reused by validators and tests. */
-export const MAX_CARD_ID = DECK_SIZE - 1;

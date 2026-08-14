@@ -25,7 +25,6 @@ export class App {
   private readonly overlayHost: HTMLElement;
   private gameScreen: GameScreen | null = null;
   private unmountGame: (() => void) | null = null;
-  private currentScreen: string | null = null;
   private lastAnnouncement = '';
 
   constructor(
@@ -100,7 +99,6 @@ export class App {
         render(this.screenHost, this.gameScreen.root);
       }
       this.gameScreen.update();
-      this.currentScreen = 'game';
       return;
     }
 
@@ -126,7 +124,6 @@ export class App {
       default:
         break;
     }
-    this.currentScreen = state.screen;
   }
 
   /** Non-technical error screen with concrete ways out. */
@@ -231,10 +228,5 @@ export class App {
       this.overlayHost.firstElementChild?.dispatchEvent(new CustomEvent('modal:closed'));
       render(this.overlayHost);
     }
-  }
-
-  /** Exposed for tests: which screen is currently mounted. */
-  getMountedScreen(): string | null {
-    return this.currentScreen;
   }
 }
