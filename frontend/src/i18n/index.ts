@@ -52,8 +52,14 @@ export function getLocale(): Locale {
 }
 
 /**
- * Restore the remembered locale, else follow the browser's preference, else the
- * default. Called once at start-up.
+ * Restore the remembered locale, else use the default. Called once at start-up.
+ *
+ * Deliberately does **not** consult `navigator.language`. This game is for a
+ * Hebrew-speaking table, and a browser set to English — which is most phones sold
+ * here — would otherwise hand a Hebrew speaker an English board. The switch is
+ * one tap away and the choice is remembered, so guessing from the browser buys
+ * nothing and gets it wrong more often than right. (Same rule as the owner's
+ * SuperTaki project, which is stored-choice-else-Hebrew.)
  */
 export function initLocale(): Locale {
   let stored: string | null = null;
@@ -62,18 +68,7 @@ export function initLocale(): Locale {
   } catch {
     stored = null;
   }
-  if (isLocale(stored)) {
-    current = stored;
-    return current;
-  }
-  for (const tag of globalThis.navigator?.languages ?? []) {
-    const base = tag.toLowerCase().split('-')[0];
-    if (isLocale(base)) {
-      current = base;
-      return current;
-    }
-  }
-  current = DEFAULT_LOCALE;
+  current = isLocale(stored) ? stored : DEFAULT_LOCALE;
   return current;
 }
 

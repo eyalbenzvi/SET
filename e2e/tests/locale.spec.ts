@@ -163,9 +163,11 @@ test.describe('invite flow', () => {
     browser,
   }, testInfo) => {
     const maya = await newPlayer(browser, 'Maya');
-    // Clipboard writes need permission in Chromium.
+    // Clipboard writes need permission *and* a focused document in Chromium;
+    // without `bringToFront` the write rejects and the button never confirms.
     await maya.context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const code = await createRoom(maya);
+    await maya.page.bringToFront();
 
     // A QR of the invite link, drawn in-page with no network request.
     const qr = maya.page.locator('.qr');
@@ -200,6 +202,7 @@ test.describe('invite flow', () => {
     const maya = await newPlayer(browser, 'Maya');
     await maya.context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const code = await createRoom(maya);
+    await maya.page.bringToFront();
     await maya.page.getByTestId('copy-link').click();
     const url = await maya.page.evaluate(() => navigator.clipboard.readText());
 

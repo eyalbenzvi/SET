@@ -21,7 +21,9 @@ export const en = {
   'common.retry': 'Try again',
   'common.home': 'Back to home',
   'common.loading': 'Loading…',
-  'common.copied': 'Link copied',
+  // Shown on the button that was just tapped, which may have copied either the
+  // code or the link — so it names neither.
+  'common.copied': 'Copied',
   'common.you': 'you',
   'common.host': 'Host',
 

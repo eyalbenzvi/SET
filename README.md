@@ -35,6 +35,20 @@ five-second pause if they were wrong. The game ends when the deck is empty and n
 set remains; final ranking is by number of sets found, and equal scores are a
 genuine tie.
 
+The four questions players ask first, answered explicitly:
+
+- **Whose turn is it?** Nobody's. There are no turns at all — everyone looks at the
+  same twelve cards at the same moment and the first correct claim wins them.
+- **When does the turn pass?** It doesn't. Play only pauses for the one player who
+  claimed wrongly, for five seconds, while everyone else keeps going.
+- **Does the board refill?** Yes, back to twelve: a claimed set is replaced in the
+  same three places, so the layout does not jump around. Once the deck runs out the
+  board simply gets smaller. The exception is a correct **No SET on board**, which
+  deals three extra cards on top — the board then holds 15 (or 18, 21…) until a set
+  is taken from it, and only then shrinks back towards twelve.
+- **Is there a deck?** Yes — 81 cards, minus the twelve on the table. The header
+  shows how many are left, so everyone can see the endgame coming.
+
 ## Prerequisites
 
 - **Node.js 20.19+ or 22.12+** (the repo is developed and tested on 22) and npm 10+.
@@ -234,10 +248,18 @@ can be tested in plain Node.
 - **Colour is never the only signal.** Every card carries a full text label,
   shapes and shading are distinct, selection is shown with a border, a lift and a
   numbered badge, and an optional switch adds R/G/P letters to each card.
-- **English by default**, with every user-facing string in `frontend/src/i18n/en.ts`.
-  Adding Hebrew means adding one dictionary and setting `meta.dir` to `rtl`; no
-  component contains literal display text, and the shell already applies `dir` to
-  `<html>`.
+- **Hebrew by default, English one tap away.** Every user-facing string lives in a
+  dictionary (`frontend/src/i18n/he.ts`, `frontend/src/i18n/en.ts`); no component
+  contains literal display text. A dictionary declares its own `meta.dir`, and the
+  shell applies that to `<html dir>`, so Hebrew renders right-to-left throughout.
+  The choice is remembered in `localStorage`; the browser's own language is
+  deliberately not consulted, because a phone set to English is not evidence that
+  its owner wants an English board. Adding a third language means adding one
+  dictionary and nothing else.
+- **Card labels agree grammatically.** Hebrew inflects the shape, colour and
+  shading together with the count — a two-symbol card reads
+  `2 מעוינים אדומים מפוספסים`, not the singular forms — so the labels a screen
+  reader speaks are real sentences in both languages.
 
 ## Known limitations
 

@@ -20,7 +20,7 @@ import type { Store } from '../state/store.js';
 import { createSvgDefs } from './card.js';
 import { button, el, render } from './dom.js';
 import { HomeScreen } from './screens/home.js';
-import { createLobbyScreen } from './screens/lobby.js';
+import { LobbyScreen } from './screens/lobby.js';
 import { GameScreen } from './screens/game.js';
 import { createResultsScreen } from './screens/results.js';
 import { createTutorial } from './screens/tutorial.js';
@@ -34,6 +34,9 @@ export class App {
   private gameScreen: GameScreen | null = null;
   private unmountGame: (() => void) | null = null;
   private homeScreen: HomeScreen | null = null;
+  private lobbyScreen: LobbyScreen | null = null;
+  /** Whether the lobby currently on screen was built for the host. */
+  private lobbyHost = false;
   private lastAnnouncement = '';
 
   constructor(
@@ -56,6 +59,8 @@ export class App {
   /** (Re)compose the shell and apply the active locale's text direction. */
   private rebuild(): void {
     this.homeScreen = null;
+    this.lobbyScreen?.dispose();
+    this.lobbyScreen = null;
     this.gameScreen = null;
     this.unmountGame?.();
     this.unmountGame = null;
@@ -163,6 +168,10 @@ export class App {
       this.gameScreen = null;
     }
     if (state.screen !== 'home') this.homeScreen = null;
+    if (state.screen !== 'lobby' && this.lobbyScreen) {
+      this.lobbyScreen.dispose();
+      this.lobbyScreen = null;
+    }
 
     switch (state.screen) {
       case 'home': {
@@ -175,9 +184,24 @@ export class App {
         this.homeScreen.update();
         break;
       }
-      case 'lobby':
-        render(this.screenHost, createLobbyScreen(this.store));
+      case 'lobby': {
+        // Persistent for the life of one room: rebuilding it would wipe a
+        // "Copied" confirmation and collapse the open invite disclosure. A
+        // different room code, or a host handover (which changes whether there is
+        // a start button), builds a fresh one.
+        const code = state.room?.code ?? '';
+        const host = this.store.isHost();
+        let lobby = this.lobbyScreen;
+        if (lobby?.code !== code || this.lobbyHost !== host) {
+          lobby?.dispose();
+          lobby = new LobbyScreen(this.store, code);
+          this.lobbyScreen = lobby;
+          this.lobbyHost = host;
+          render(this.screenHost, lobby.root);
+        }
+        lobby.update();
         break;
+      }
       case 'results':
         render(this.screenHost, createResultsScreen(this.store));
         break;
