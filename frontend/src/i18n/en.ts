@@ -86,7 +86,7 @@ export const en = {
 
   'game.hint1': 'Hint 1',
   'game.hint2': 'Hint 2',
-  // `{clock}` counts down to the moment the hint unlocks: "Hint 2 · 1:12".
+  // `{clock}` counts down to the moment the hint unlocks: "Hint 2 · 42".
   'game.hintLocked': '{label} · {clock}',
   'game.hintTaken': '{label} ✓',
   'game.moreCards': '+3 cards',
@@ -191,7 +191,7 @@ export const en = {
   'tutorial.flowTurns':
     'There are no turns. Everyone plays at the same time, on the same twelve cards, and the first correct claim wins them.',
   'tutorial.flowClaim':
-    'Tap three cards, then “Claim SET”. Correct scores you a point. Wrong pauses you alone for 5 seconds — everyone else keeps playing.',
+    'Tap three cards, then “Claim SET”. Correct scores you a point. Wrong pauses you alone for 2 seconds — everyone else keeps playing.',
   'tutorial.flowRefill':
     'The board refills itself back to twelve from the deck, so there are almost always twelve cards in front of you.',
   'tutorial.flowNoSet':
@@ -199,7 +199,7 @@ export const en = {
   'tutorial.flowMoreCards':
     'Stuck but not sure the board is dead? Tap “+3 cards”. Nothing happens until every player has tapped it, and then three cards are added — so one player can never blow up a position somebody else has already spotted.',
   'tutorial.flowHints':
-    'After a minute on the same board, “Hint 1” marks one card that really is part of a SET. A minute later “Hint 2” marks two, which leaves exactly one card that can complete them. Both clocks restart whenever the board changes, and only you see your own hint.',
+    'After 30 seconds on the same board, “Hint 1” marks one card that really is part of a SET. Thirty seconds later “Hint 2” marks two, which leaves exactly one card that can complete them. Both clocks restart whenever the board changes, and only you see your own hint.',
   'tutorial.flowLastSet':
     'When somebody claims a SET, the three cards appear at the top of the screen for a few seconds, so you can see what you missed.',
   'tutorial.flowDeck':

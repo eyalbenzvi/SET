@@ -194,7 +194,7 @@ async function isFinished(page: Page): Promise<boolean> {
  * Wait until this player is free to act.
  *
  * "No SET on board" is disabled for exactly one reason — this player's own
- * five-second cooldown — so it doubles as the "am I cooling down?" signal.
+ * cooldown after a wrong call — so it doubles as the "am I cooling down?" signal.
  */
 async function waitOutCooldown(page: Page): Promise<void> {
   await expect(page.getByTestId('no-set')).toBeEnabled({ timeout: 15_000 });

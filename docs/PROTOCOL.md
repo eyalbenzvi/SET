@@ -113,7 +113,7 @@ Claims: `not_a_set`, `board_changed`, `cooldown`, `not_playing`, `invalid_cards`
 Requests for more cards: `deck_empty`, `board_full`, `not_playing`, `board_changed`.
 Hints: `too_soon`, `no_set`, `not_playing`, `board_changed`.
 
-Only `not_a_set` and `set_exists` apply the 5-second cooldown. `board_changed`
+Only `not_a_set` and `set_exists` apply the 2-second cooldown. `board_changed`
 never does: being beaten to a set is not a mistake. Asking for cards or for a
 hint never costs a cooldown either, and both are allowed while one is running —
 they are requests, not moves on the board.
@@ -134,11 +134,11 @@ Internal errors are logged nowhere sensitive and never expose a stack trace.
 | `MIN_PLAYERS` / `MAX_PLAYERS` | 2 / 8          |
 | `MAX_NAME_LENGTH`             | 20 code points |
 | `ROOM_CODE_LENGTH`            | 6              |
-| `INVALID_ACTION_COOLDOWN_MS`  | 5,000          |
+| `INVALID_ACTION_COOLDOWN_MS`  | 2,000          |
 | `RECONNECT_GRACE_MS`          | 60,000         |
 | `MAX_MESSAGE_BYTES`           | 1,024          |
 | `ROOM_IDLE_TTL_MS`            | 1,800,000      |
 | `MAX_BOARD_SIZE`              | 21             |
 | `DEAL_VOTE_TTL_MS`            | 45,000         |
-| `HINT_LEVEL_1_AFTER_MS`       | 60,000         |
-| `HINT_LEVEL_2_AFTER_MS`       | 120,000        |
+| `HINT_LEVEL_1_AFTER_MS`       | 30,000         |
+| `HINT_LEVEL_2_AFTER_MS`       | 60,000         |

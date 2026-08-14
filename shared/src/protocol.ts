@@ -24,8 +24,13 @@ export const ROOM_CODE_LENGTH = 6;
 /** Code alphabet with visually confusable characters (I, O, 0, 1) removed. */
 export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
-/** Cooldown applied to a single player after an invalid claim or bad no-set call. */
-export const INVALID_ACTION_COOLDOWN_MS = 5_000;
+/**
+ * Cooldown applied to a single player after an invalid claim or bad no-set call.
+ *
+ * Short on purpose: it exists to stop rapid guessing, not to bench a player while
+ * the board they were looking at gets taken from under them.
+ */
+export const INVALID_ACTION_COOLDOWN_MS = 2_000;
 /** How long a disconnected player keeps their seat, score and identity. */
 export const RECONNECT_GRACE_MS = 60_000;
 /** Largest inbound frame the server will parse. Anything bigger is dropped. */
@@ -44,9 +49,9 @@ export const MAX_BOARD_SIZE = 21;
 /** How long an open request for more cards waits for the table before it lapses. */
 export const DEAL_VOTE_TTL_MS = 45_000;
 /** Time on an unchanged board before the first hint unlocks. */
-export const HINT_LEVEL_1_AFTER_MS = 60_000;
-/** ...and before the second, stronger hint unlocks. */
-export const HINT_LEVEL_2_AFTER_MS = 120_000;
+export const HINT_LEVEL_1_AFTER_MS = 30_000;
+/** ...and before the second, stronger hint unlocks: another 30 seconds. */
+export const HINT_LEVEL_2_AFTER_MS = 60_000;
 
 /** Hint 1 marks one card of a SET; hint 2 marks two, which fixes the third. */
 export type HintLevel = 1 | 2;

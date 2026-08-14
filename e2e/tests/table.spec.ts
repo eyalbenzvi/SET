@@ -2,7 +2,7 @@
  * The three things a table asks for once it has played a few rounds:
  *
  *  - more cards, when everybody agrees the position is stuck,
- *  - a hint, once a board has resisted for a minute,
+ *  - a hint, once a board has resisted for half a minute,
  *  - and a look at the SET somebody else just took.
  *
  * The hint test really does wait out the two unlock timers rather than reaching
@@ -133,9 +133,9 @@ test.describe('hints', () => {
     // Both start locked, counting down, and saying so on the button.
     await expect(hint1).toBeDisabled();
     await expect(hint2).toBeDisabled();
-    // A minute out the countdown reads "1:00"; below that, plain seconds.
+    // Hint 2 starts a minute out and reads "1:00"; below that, plain seconds.
     await expect(hint1).toHaveText(/^Hint 1 · (1:00|\d{1,2})$/);
-    await expect(hint2).toHaveText(/^Hint 2 · 1:\d\d$/);
+    await expect(hint2).toHaveText(/^Hint 2 · (1:00|\d{1,2})$/);
 
     // Make sure this board has a set to point at, then leave it alone so the
     // clock runs on the position the players are actually looking at.
@@ -162,7 +162,7 @@ test.describe('hints', () => {
 
     await maya.page.screenshot({ path: `screenshots/${testInfo.project.name}-hint.png` });
 
-    // The second level opens a minute later and marks two cards, which between
+    // The second level opens 30 seconds later and marks two cards, which between
     // them determine the third.
     await expect(hint2).toBeEnabled({
       timeout: HINT_LEVEL_2_AFTER_MS - HINT_LEVEL_1_AFTER_MS + 20_000,
@@ -196,8 +196,7 @@ test.describe('hints', () => {
     await expect(maya.page.locator('.card--hinted')).toHaveCount(0);
     // ...and the clock starts again from the top.
     await expect(hint1).toBeDisabled();
-    // A minute out the countdown reads "1:00"; below that, plain seconds.
-    await expect(hint1).toHaveText(/^Hint 1 · (1:00|\d{1,2})$/);
+    await expect(hint1).toHaveText(/^Hint 1 · \d{1,2}$/);
     await closePlayers(maya, david);
   });
 });

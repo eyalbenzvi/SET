@@ -28,10 +28,10 @@ same and one different, it is not a set.
 
 Twelve cards are dealt face up. Everyone searches at once. Claim three cards and
 the server checks them: correct scores a point and the cards are replaced; wrong
-pauses only you for five seconds and explains which feature clashed. If nobody
+pauses only you for two seconds and explains which feature clashed. If nobody
 can find a set, anyone can press **No SET on board** — the server recomputes the
 answer, deals three more cards if the caller was right, and applies the same
-five-second pause if they were wrong. The game ends when the deck is empty and no
+two-second pause if they were wrong. The game ends when the deck is empty and no
 set remains; final ranking is by number of sets found, and equal scores are a
 genuine tie.
 
@@ -40,7 +40,7 @@ The four questions players ask first, answered explicitly:
 - **Whose turn is it?** Nobody's. There are no turns at all — everyone looks at the
   same twelve cards at the same moment and the first correct claim wins them.
 - **When does the turn pass?** It doesn't. Play only pauses for the one player who
-  claimed wrongly, for five seconds, while everyone else keeps going.
+  claimed wrongly, for two seconds, while everyone else keeps going.
 - **Does the board refill?** Yes, back to twelve: a claimed set is replaced in the
   same three places, so the layout does not jump around. Once the deck runs out the
   board simply gets smaller. The exception is a correct **No SET on board**, which
@@ -60,9 +60,9 @@ The four questions players ask first, answered explicitly:
   position. The board stops at **21 cards**: the largest set-free collection in SET
   is 20 cards, so 21 face-up cards are guaranteed to contain a set and more can
   never help.
-- **Hints, on a clock.** After a minute on the same board, **Hint 1** marks one card
-  that really is part of a set. A minute later, **Hint 2** marks two — which leaves
-  exactly one card that can complete them. The clock runs on the current board and
+- **Hints, on a clock.** After 30 seconds on the same board, **Hint 1** marks one
+  card that really is part of a set. Thirty seconds later, **Hint 2** marks two —
+  which leaves exactly one card that can complete them. The clock runs on the current board and
   restarts whenever the board changes, so it measures time actually spent stuck. The
   cards go only to the player who asked; everyone else is told a hint was taken and
   never which cards it named. The server refuses a hint on a set-free board and says
