@@ -115,17 +115,18 @@ server is not configured, rather than silently trying to reach localhost.
 
 ## Deploy the backend (Cloudflare)
 
-1. Put your GitHub Pages origin in `worker/wrangler.toml`, replacing the
-   placeholder. Scheme and host only, no path:
+1. Check the allowed origin in `worker/wrangler.toml`. It is pre-filled with the
+   GitHub Pages origin for this repository:
 
    ```toml
    [vars]
-   ALLOWED_ORIGINS = "https://<your-github-username>.github.io"
+   ALLOWED_ORIGINS = "https://eyalbenzvi.github.io"
    ```
 
-   `localhost` and `127.0.0.1` are always allowed, so this is the only origin you
-   need to add. Multiple origins are comma-separated. Any other origin gets a
-   `403` naming this variable, so a missed step is obvious rather than mysterious.
+   Change it only if you serve the game from another domain. `localhost` and
+   `127.0.0.1` are always allowed, so nothing is needed for local development.
+   Multiple origins are comma-separated. Any other origin gets a `403` naming
+   this variable, so a missed step is obvious rather than mysterious.
 
 2. Deploy:
 

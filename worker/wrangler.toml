@@ -5,15 +5,15 @@ compatibility_date = "2025-09-01"
 # ---------------------------------------------------------------------------
 # Browser origins allowed to use this backend.
 #
-# Replace the placeholder below with your GitHub Pages origin — the scheme and
-# host only, no path:
-#     https://<your-github-username>.github.io
+# Pre-filled with the GitHub Pages origin for this repository
+# (github.com/eyalbenzvi/SET -> https://eyalbenzvi.github.io). Change it only if
+# you serve the game from a different domain. Scheme and host only, no path.
 #
 # Multiple origins are comma-separated. localhost and 127.0.0.1 are always
 # allowed, so local development needs no change here.
 # ---------------------------------------------------------------------------
 [vars]
-ALLOWED_ORIGINS = "https://REPLACE-ME.github.io"
+ALLOWED_ORIGINS = "https://eyalbenzvi.github.io"
 
 [[durable_objects.bindings]]
 name = "GAME_ROOM"
