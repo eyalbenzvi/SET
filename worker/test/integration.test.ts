@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   INITIAL_BOARD_SIZE,
   MAX_MESSAGE_BYTES,
+  HINT_LEVEL_1_AFTER_MS,
   MAX_BOARD_SIZE,
   MAX_PLAYERS,
   PROTOCOL_VERSION,
@@ -661,7 +662,9 @@ describe('hints, over the wire', () => {
     const rejection = await host.waitFor((m) => m.t === 'hintRejected');
     expect(rejection).toMatchObject({ reason: 'too_soon' });
     if (rejection.t !== 'hintRejected') throw new Error('unreachable');
-    expect(rejection.availableAt - rejection.serverTime).toBeGreaterThan(50_000);
+    const wait = rejection.availableAt - rejection.serverTime;
+    expect(wait).toBeGreaterThan(HINT_LEVEL_1_AFTER_MS - 5_000);
+    expect(wait).toBeLessThanOrEqual(HINT_LEVEL_1_AFTER_MS);
 
     // A locked hint is not an event: the other player is told nothing at all.
     await sleep(150);

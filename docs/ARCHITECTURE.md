@@ -75,7 +75,7 @@ applied to a different board.
 
 **A stale claim is never punished.** The check order in `GameRoom.claim` is
 cooldown → board version → validity. Losing a race is not a mistake, so it costs
-nothing; only a genuinely wrong claim starts the 5-second cooldown.
+nothing; only a genuinely wrong claim starts the 2-second cooldown.
 
 **Replacement cards keep their slots.** When the board is at 12 and the deck has
 cards, the three replacements go into the vacated positions. Cards the player was
