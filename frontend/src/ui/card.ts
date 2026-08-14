@@ -61,15 +61,15 @@ export interface CardRenderOptions {
  * the entire card for a screen-reader user.
  */
 export function cardLabel(card: Card): string {
-  const shapeKey =
-    card.count === 0
-      ? `value.shape.${SHAPE_VALUES[card.shape]}`
-      : `value.shapePlural.${SHAPE_VALUES[card.shape]}`;
+  // Shape, colour and shading all inflect together. English spells the plural of
+  // "red" and "striped" the same as the singular, but Hebrew does not
+  // ("2 מעוינים אדומים מפוספסים"), so every slot has both forms.
+  const plural = card.count > 0 ? 'Plural' : '';
   return t('game.cardLabel', {
     count: t(`value.count.${COUNT_VALUES[card.count]}` as StringKey),
-    shape: t(shapeKey as StringKey),
-    color: t(`value.color.${COLOR_VALUES[card.color]}` as StringKey),
-    fill: t(`value.fill.${FILL_VALUES[card.fill]}` as StringKey),
+    shape: t(`value.shape${plural}.${SHAPE_VALUES[card.shape]}` as StringKey),
+    color: t(`value.color${plural}.${COLOR_VALUES[card.color]}` as StringKey),
+    fill: t(`value.fill${plural}.${FILL_VALUES[card.fill]}` as StringKey),
   });
 }
 

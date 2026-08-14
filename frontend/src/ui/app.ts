@@ -7,11 +7,19 @@
  * change, which is cheap because they are small and static.
  */
 
-import { t, direction } from '../i18n/index.js';
+import {
+  LOCALE_NAMES,
+  LOCALES_AVAILABLE,
+  direction,
+  getLocale,
+  setLocale,
+  t,
+  type Locale,
+} from '../i18n/index.js';
 import type { Store } from '../state/store.js';
 import { createSvgDefs } from './card.js';
 import { button, el, render } from './dom.js';
-import { createHomeScreen } from './screens/home.js';
+import { HomeScreen } from './screens/home.js';
 import { createLobbyScreen } from './screens/lobby.js';
 import { GameScreen } from './screens/game.js';
 import { createResultsScreen } from './screens/results.js';
@@ -25,6 +33,7 @@ export class App {
   private readonly overlayHost: HTMLElement;
   private gameScreen: GameScreen | null = null;
   private unmountGame: (() => void) | null = null;
+  private homeScreen: HomeScreen | null = null;
   private lastAnnouncement = '';
 
   constructor(
@@ -41,6 +50,16 @@ export class App {
     });
     this.overlayHost = el('div', { class: 'overlayHost' });
 
+    this.rebuild();
+  }
+
+  /** (Re)compose the shell and apply the active locale's text direction. */
+  private rebuild(): void {
+    this.homeScreen = null;
+    this.gameScreen = null;
+    this.unmountGame?.();
+    this.unmountGame = null;
+    this.lastAnnouncement = '';
     render(
       this.root,
       createSvgDefs(document),
@@ -52,6 +71,8 @@ export class App {
       this.settingsBar(),
     );
     document.documentElement.setAttribute('dir', direction());
+    document.documentElement.setAttribute('lang', getLocale());
+    this.render();
   }
 
   start(): void {
@@ -67,6 +88,7 @@ export class App {
     });
     input.checked = this.store.getState().settings.colorAssist;
     input.addEventListener('change', () => this.store.setColorAssist(input.checked));
+
     return el('div', {
       class: 'settingsBar',
       children: [
@@ -79,8 +101,41 @@ export class App {
             el('span', { class: 'switch__label', text: t('settings.colorAssist') }),
           ],
         }),
+        this.languageSwitch(),
       ],
     });
+  }
+
+  /**
+   * Language switch. Changing language rebuilds the whole shell, because every
+   * built string and the document's text direction are captured at build time.
+   */
+  private languageSwitch(): HTMLElement {
+    const buttons = LOCALES_AVAILABLE.map((locale) =>
+      button(
+        LOCALE_NAMES[locale],
+        locale === getLocale() ? 'secondary' : 'ghost',
+        () => this.changeLocale(locale),
+        {
+          class: `btn--tiny${locale === getLocale() ? ' btn--current' : ''}`,
+          attrs: {
+            'data-testid': `lang-${locale}`,
+            'aria-pressed': locale === getLocale() ? 'true' : 'false',
+          },
+        },
+      ),
+    );
+    return el('div', {
+      class: 'langSwitch',
+      attrs: { role: 'group', 'aria-label': t('settings.language') },
+      children: buttons,
+    });
+  }
+
+  private changeLocale(locale: Locale): void {
+    if (locale === getLocale()) return;
+    setLocale(locale);
+    this.rebuild();
   }
 
   private render(): void {
@@ -107,11 +162,19 @@ export class App {
       this.unmountGame = null;
       this.gameScreen = null;
     }
+    if (state.screen !== 'home') this.homeScreen = null;
 
     switch (state.screen) {
-      case 'home':
-        render(this.screenHost, createHomeScreen(this.store));
+      case 'home': {
+        // Persistent: rebuilding it would destroy the focused input on every
+        // keystroke. Built once, patched thereafter.
+        if (!this.homeScreen) {
+          this.homeScreen = new HomeScreen(this.store);
+          render(this.screenHost, this.homeScreen.root);
+        }
+        this.homeScreen.update();
         break;
+      }
       case 'lobby':
         render(this.screenHost, createLobbyScreen(this.store));
         break;

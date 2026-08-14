@@ -42,9 +42,16 @@ export const en = {
   'home.codeInvalid': 'Room codes are {length} letters and digits.',
 
   'lobby.title': 'Room {code}',
-  'lobby.share': 'Invite players',
+  'lobby.inviteTitle': 'Invite players',
+  'lobby.inviteBody': 'Send them the code or the link. They join from their own device.',
+  'lobby.inviteLink': 'Invite link',
+  'lobby.qrCaption': 'or scan from a phone',
+  'lobby.qrLabel': 'QR code with the invite link for room {room}',
   'lobby.shareText': 'Join my SET game — room {code}',
-  'lobby.copyCode': 'Copy code',
+  'lobby.shareUnavailable': 'Sharing is not supported in this browser. You can copy the link.',
+  'common.copyLink': 'Copy link',
+  'common.copyCode': 'Copy code',
+  'common.share': 'Share',
   'lobby.players': 'Players ({count}/{max})',
   'lobby.waitingForHost': 'Waiting for {name} to start the game…',
   'lobby.needMorePlayers': 'Waiting for at least {min} players…',
@@ -52,6 +59,9 @@ export const en = {
   'lobby.leave': 'Leave room',
   'lobby.disconnected': 'reconnecting…',
   'lobby.hint': 'Everyone plays at the same time — there are no turns.',
+  'lobby.noTurns': 'No turns',
+  'lobby.noTurnsBody':
+    'All players look at the same cards at once and race to claim a SET. Nobody waits for anybody.',
 
   'game.claim': 'Claim SET',
   'game.claimSelected': 'Claim SET ({count}/3)',
@@ -112,9 +122,17 @@ export const en = {
   'value.color.red': 'red',
   'value.color.green': 'green',
   'value.color.purple': 'purple',
+  // English does not inflect these, but Hebrew and many others do, so the plural
+  // slot exists for every attribute that a card label pluralises.
+  'value.colorPlural.red': 'red',
+  'value.colorPlural.green': 'green',
+  'value.colorPlural.purple': 'purple',
   'value.fill.open': 'open',
   'value.fill.striped': 'striped',
   'value.fill.solid': 'solid',
+  'value.fillPlural.open': 'open',
+  'value.fillPlural.striped': 'striped',
+  'value.fillPlural.solid': 'solid',
 
   'results.title': 'Final scores',
   'results.winner': '{name} wins!',
@@ -139,9 +157,19 @@ export const en = {
   'tutorial.validAllDiffHeading': 'Valid — every single feature is different',
   'tutorial.invalidHeading': 'Not a SET — two purple and one green',
   'tutorial.invalidWhy': 'If even one feature has two the same and one different, it is not a SET.',
-  'tutorial.flow':
-    'Everyone plays at once. Tap three cards and claim. A wrong claim pauses you for 5 seconds. If nobody can find a SET, tap “No SET on board” to deal three more cards.',
+  'tutorial.flowTitle': 'How a game runs',
+  'tutorial.flowTurns':
+    'There are no turns. Everyone plays at the same time, on the same twelve cards, and the first correct claim wins them.',
+  'tutorial.flowClaim':
+    'Tap three cards, then “Claim SET”. Correct scores you a point. Wrong pauses you alone for 5 seconds — everyone else keeps playing.',
+  'tutorial.flowRefill':
+    'The board refills itself back to twelve from the deck, so there are almost always twelve cards in front of you.',
+  'tutorial.flowNoSet':
+    'If nobody can find a SET, anyone may tap “No SET on board”. If the board really has none, three more cards are added (fifteen, then eighteen) and no card is replaced until it is back down to twelve.',
+  'tutorial.flowDeck':
+    'The counter at the top left shows how many cards are still in the deck, out of 81. The game ends when the deck is empty and no SET is left. Most SETs wins; an equal score is a tie.',
   'tutorial.gotIt': 'Got it',
+  'settings.language': 'Language',
 
   'settings.title': 'Display',
   'settings.colorAssist': 'Colour-blind labels',

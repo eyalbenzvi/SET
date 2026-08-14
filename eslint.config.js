@@ -79,6 +79,15 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node } },
   },
   {
+    // `qr.ts` is a verbatim port of the owner's SuperTaki encoder. It is left
+    // byte-identical apart from the added renderer, because hand-editing bit
+    // manipulation for a style rule is a good way to introduce a subtle bug.
+    files: ['frontend/src/ui/qr.ts'],
+    rules: {
+      '@typescript-eslint/non-nullable-type-assertion-style': 'off',
+    },
+  },
+  {
     // Tests assert on shapes the type system already knows; the noise is not useful.
     files: ['**/test/**/*.ts', 'e2e/**/*.ts'],
     rules: {

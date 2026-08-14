@@ -3,8 +3,9 @@
  * data, and must describe itself for assistive technology.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { COLOR_VALUES, DECK, cardById, makeCard } from '@set/shared';
+import { setLocale } from '../src/i18n/index.js';
 import {
   cardLabel,
   createCardElement,
@@ -12,6 +13,12 @@ import {
   flashCard,
   setCardSelected,
 } from '../src/ui/card.js';
+
+// Hebrew is the app's default locale; these assertions are about the English
+// wording, so pin it. A Hebrew case is covered at the end of the file.
+beforeAll(() => {
+  setLocale('en');
+});
 
 describe('createSvgDefs', () => {
   it('defines one stripe pattern per colour', () => {
@@ -147,6 +154,35 @@ describe('setCardSelected', () => {
     expect(element.getAttribute('aria-pressed')).toBe('false');
     expect(element.querySelector('.card__badge')?.textContent).toBe('');
     expect(element.getAttribute('aria-label')).toBe(cardLabel(cardById(5)));
+  });
+});
+
+describe('Hebrew labels', () => {
+  beforeEach(() => {
+    setLocale('he');
+  });
+  afterEach(() => {
+    setLocale('en');
+  });
+
+  it('describes a card in Hebrew, with the count as a digit and the adjectives agreeing', () => {
+    // A digit reads idiomatically before a Hebrew plural noun, and the colour and
+    // shading inflect with it — "2 מעוינים אדומים מפוספסים", not "אדום מפוספס".
+    expect(cardLabel(makeCard(1, 1, 0, 1))).toBe('2 מעוינים אדומים מפוספסים');
+  });
+
+  it('uses the singular shape for a one-symbol card', () => {
+    expect(cardLabel(makeCard(0, 0, 1, 2))).toBe('1 סגלגל ירוק מלא');
+  });
+
+  it('derives the colour-assist letter from the Hebrew colour names', () => {
+    const letters = [0, 1, 2].map(
+      (color) =>
+        createCardElement(document, makeCard(0, 0, color as 0 | 1 | 2, 0).id, {
+          colorAssist: true,
+        }).querySelector('.card__assist')?.textContent,
+    );
+    expect(letters).toEqual(['א', 'י', 'ס']);
   });
 });
 

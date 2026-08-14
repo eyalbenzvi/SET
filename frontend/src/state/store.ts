@@ -244,10 +244,26 @@ export class Store {
     this.patch({ homeMode: mode, formError: null });
   }
 
+  /**
+   * Record the typed name **without** notifying listeners.
+   *
+   * The name field is owned by the DOM while the player types in it. Publishing
+   * a state change per keystroke would re-render the screen, destroy the focused
+   * input and eject the player mid-word — so this writes through silently and the
+   * screen reads the value back only when it is not focused.
+   */
   setName(name: string): void {
-    this.patch({ name, formError: null });
+    this.state = { ...this.state, name, formError: null };
   }
 
+  /** Same contract as `setName`, plus the room-code normalisation rules. */
+  normalizeCodeInput(raw: string): string {
+    const codeInput = raw.toUpperCase().replace(/\s+/g, '').slice(0, ROOM_CODE_LENGTH);
+    this.state = { ...this.state, codeInput, formError: null };
+    return codeInput;
+  }
+
+  /** Set the room code from outside the input (a join link), with a re-render. */
   setCodeInput(code: string): void {
     this.patch({ codeInput: code.toUpperCase().slice(0, ROOM_CODE_LENGTH), formError: null });
   }
