@@ -82,15 +82,42 @@ export const he = {
   'game.fourthBlocked': 'אפשר לבחור שלושה קלפים בלבד. הקישו על קלף נבחר כדי לבטל אותו.',
   'game.cardLabel': '{count} {shape} {color} {fill}',
   'game.selectedPosition': 'נבחר, מקום {index} מתוך 3',
+  'game.hintedCard': 'מסומן ברמז',
   'game.boardLabel': 'שולחן המשחק, {count} קלפים',
   'game.leave': 'יציאה',
   'game.leaveConfirm': 'הקישו שוב ליציאה',
+
+  'game.hint1': 'רמז 1',
+  'game.hint2': 'רמז 2',
+  // `{clock}` הוא ספירה לאחור עד שהרמז נפתח: "רמז 2 · 1:12".
+  'game.hintLocked': '{label} · {clock}',
+  'game.hintTaken': '{label} ✓',
+  'game.moreCards': '\u200e+3 קלפים',
+  'game.moreCardsAgree': 'מסכימים? {votes}/{needed}',
+  'game.moreCardsWaiting': 'ממתינים {votes}/{needed}',
+  'game.lastSet': '{name} לקח',
+  'game.lastSetYou': 'לקחתם',
+
+  'hint.revealedOne': 'קלף אחד מתוך SET מסומן. מצאו את השניים האחרים.',
+  'hint.revealedTwo': 'שני קלפים מתוך SET מסומנים — יש בדיוק קלף אחד שמשלים אותם.',
+  'hint.tooSoon': 'הרמז ייפתח בעוד {seconds} שנ׳.',
+  'hint.noSet': 'אין SET על השולחן הזה — הקישו «אין SET על השולחן».',
+
+  'deal.deckEmpty': 'הקופה ריקה, אין יותר קלפים לחלוקה.',
+  'deal.boardFull': 'השולחן הגיע לגודל המקסימלי.',
 
   'feed.setFound': '{name} מצא SET \u200e+1',
   'feed.setFoundYou': 'מצאתם SET \u200e+1',
   'feed.invalidClaim': 'ל{name} לא היה SET',
   'feed.invalidClaimYou': 'זה לא SET',
   'feed.cardsAdded': 'נוספו 3 קלפים',
+  'feed.cardsAddedAgreed': 'כולם הסכימו — נוספו 3 קלפים',
+  'feed.dealAsked': '{name} רוצה עוד 3 קלפים ({votes}/{needed})',
+  'feed.dealAskedYou': 'ביקשתם עוד 3 קלפים — ממתינים לשאר ({votes}/{needed})',
+  'feed.dealWithdrew': '{name} כבר לא רוצה עוד קלפים',
+  'feed.dealWithdrewYou': 'הבקשה בוטלה',
+  'feed.dealLapsed': 'אף אחד אחר לא הסכים, הבקשה בוטלה',
+  'feed.hintUsed': '{name} לקח רמז',
   'feed.noSetRejected': '{name} הכריז שאין SET, אבל יש',
   'feed.playerJoined': '{name} הצטרף',
   'feed.playerLeft': '{name} יצא',
@@ -169,6 +196,12 @@ export const he = {
     'השולחן מתמלא מעצמו בחזרה לשנים־עשר קלפים מהקופה, כך שכמעט תמיד יש שנים־עשר קלפים לפניכם.',
   'tutorial.flowNoSet':
     'אם אף אחד לא מוצא SET, כל שחקן יכול להקיש «אין SET על השולחן». אם באמת אין — נוספים שלושה קלפים (חמישה־עשר, אחר כך שמונה־עשר), ולא מתחלפים קלפים עד שהשולחן חוזר לשנים־עשר.',
+  'tutorial.flowMoreCards':
+    'נתקעתם אבל לא בטוחים שאין SET? הקישו «\u200e+3 קלפים». שום דבר לא קורה עד שכל השחקנים הקישו, ואז נוספים שלושה קלפים — כך שחקן אחד לא יכול להרוס מצב שמישהו אחר כבר ראה.',
+  'tutorial.flowHints':
+    'אחרי דקה על אותו שולחן, «רמז 1» מסמן קלף אחד שהוא באמת חלק מ-SET. דקה אחר כך «רמז 2» מסמן שניים, ואז נשאר בדיוק קלף אחד שמשלים אותם. שני הטיימרים מתאפסים בכל שינוי בשולחן, ורק אתם רואים את הרמז שלכם.',
+  'tutorial.flowLastSet':
+    'כשמישהו מוצא SET, שלושת הקלפים מוצגים בראש המסך לכמה שניות, כדי שתראו מה פספסתם.',
   'tutorial.flowDeck':
     'המונה בראש המסך מראה כמה קלפים נשארו בקופה, מתוך 81. המשחק נגמר כשהקופה ריקה ואין יותר SET על השולחן. מי שמצא הכי הרבה סטים מנצח, וניקוד זהה הוא תיקו.',
   'tutorial.gotIt': 'הבנתי',

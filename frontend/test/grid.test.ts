@@ -105,6 +105,26 @@ describe('computeLayout', () => {
     }
   });
 
+  /**
+   * The viewports above model the board area as "viewport minus a bit", which is
+   * generous. These figures are measured from the shipped game screen on a
+   * 360x640 phone — score strip, meters, the message row, the hint/­deal chips,
+   * the feedback line and the two action buttons all included — because that is
+   * the case that actually goes wrong: a board that scrolls on a phone has rows
+   * clipped behind the header and the action bar.
+   */
+  it('fits a grown board on a real phone screen, chrome included', () => {
+    const realPhone = { availableWidth: 340, availableHeight: 330, gap: GAP, aspect: ASPECT };
+    for (const cardCount of [12, 15]) {
+      const layout = computeLayout({ ...realPhone, cardCount });
+      expect(layout.scrolls, `${cardCount} cards`).toBe(false);
+      expect(occupied(layout).height, `${cardCount} cards`).toBeLessThanOrEqual(
+        realPhone.availableHeight + 0.5,
+      );
+      expect(layout.cardWidth, `${cardCount} cards`).toBeGreaterThanOrEqual(MIN_CARD_WIDTH);
+    }
+  });
+
   it('keeps cards tappable, preferring to scroll over shrinking below the minimum', () => {
     // A deliberately cramped viewport with a large board.
     const layout = layoutFor(320, 300, 21);

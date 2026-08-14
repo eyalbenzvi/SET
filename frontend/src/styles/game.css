@@ -143,10 +143,16 @@
   align-self: center;
 }
 
-/* Only when the board genuinely cannot fit at a legible card size. */
+/* Only when the board genuinely cannot fit at a legible card size — a 21-card
+   board on a small phone, essentially. The extra block padding matters: without
+   it the first and last rows sit flush against the header and the action bar,
+   which both clips them and makes the top row awkward to tap. */
 .boardWrap--scrolls {
   overflow-y: auto;
   align-items: flex-start;
+  padding-block: 18px;
+  scroll-padding-block: 18px;
+  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -288,6 +294,36 @@
   box-shadow: var(--shadow-sm);
 }
 
+/* A hinted card: dashed ring plus a corner mark, so the cue survives a
+   screenshot, a colour-blind eye and a monochrome display. Deliberately quieter
+   than selection — a hint is information, not a choice you have made. */
+.card--hinted {
+  border-color: var(--warn);
+  border-style: dashed;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 28%, transparent);
+}
+
+.card--hinted .card__hintMark {
+  display: grid;
+}
+
+.card__hintMark {
+  display: none;
+  place-items: center;
+  position: absolute;
+  top: -8px;
+  inset-inline-end: -8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--warn);
+  color: var(--bg-elevated);
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: var(--shadow-sm);
+}
+
 .card__assist {
   position: absolute;
   top: 3px;
@@ -377,6 +413,18 @@
 
 /* ---------------------------------------------------------------- Feed */
 
+/* The feed line and the "set just taken" strip share this row and never both
+   show. Its height is fixed by the taller of the two, so a message arriving or
+   expiring never resizes the header — and therefore never resizes the board
+   under the players' fingers mid-tap. */
+.headline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  min-width: 0;
+}
+
 .feed {
   min-height: 1.125rem;
   font-size: 0.78125rem;
@@ -409,6 +457,56 @@
     opacity: 1;
     transform: none;
   }
+}
+
+/* -------------------------------------------------- The set that just went */
+
+/* Sits in the header, where nothing interactive lives, so it can never cover a
+   card or a button. Hidden outright when there is nothing to show. */
+.lastSet {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lastSet[hidden] {
+  display: none;
+}
+
+.lastSet__who {
+  font-size: 0.78125rem;
+  font-weight: 700;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lastSet__cards {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.miniCard {
+  display: block;
+  width: 26px;
+  aspect-ratio: var(--card-aspect);
+  padding: 2px;
+  border-radius: 5px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+}
+
+.miniCard .card__art {
+  width: 100%;
+  height: 100%;
+}
+
+.lastSet--in {
+  animation: feed-in 240ms ease-out;
 }
 
 /* ---------------------------------------------------------------- Actions */
@@ -450,6 +548,32 @@
   gap: 8px;
 }
 
+/* Hints and "+3 cards": three equal chips on one line, above the two buttons
+   that actually change the game. Small on purpose — they are occasional. */
+.actionBar__aids {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+/* The table is waiting for this player to answer a request for more cards. */
+.btn--asking {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.btn--chip {
+  min-height: 34px;
+  padding: 5px 6px;
+  font-size: 0.78125rem;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
 .btn--claim {
   min-height: 54px;
   font-size: 1.0625rem;
@@ -472,7 +596,8 @@
     padding-inline: 20px;
   }
 
-  .actionBar__buttons {
+  .actionBar__buttons,
+  .actionBar__aids {
     max-width: 560px;
     margin: 0 auto;
     width: 100%;

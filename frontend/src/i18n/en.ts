@@ -79,15 +79,43 @@ export const en = {
   'game.fourthBlocked': 'You can only pick three cards. Tap a selected card to unpick it.',
   'game.cardLabel': '{count} {fill} {color} {shape}',
   'game.selectedPosition': 'selected, position {index} of 3',
+  'game.hintedCard': 'marked by a hint',
   'game.boardLabel': 'Game board, {count} cards',
   'game.leave': 'Leave game',
   'game.leaveConfirm': 'Tap again to leave',
+
+  'game.hint1': 'Hint 1',
+  'game.hint2': 'Hint 2',
+  // `{clock}` counts down to the moment the hint unlocks: "Hint 2 · 1:12".
+  'game.hintLocked': '{label} · {clock}',
+  'game.hintTaken': '{label} ✓',
+  'game.moreCards': '+3 cards',
+  'game.moreCardsAgree': 'Agree? {votes}/{needed}',
+  'game.moreCardsWaiting': 'Waiting {votes}/{needed}',
+  'game.lastSet': '{name} took',
+  'game.lastSetYou': 'You took',
+
+  'hint.revealedOne': 'One card of a SET is marked. Find the other two.',
+  'hint.revealedTwo':
+    'Two cards of a SET are marked — there is exactly one card that completes them.',
+  'hint.tooSoon': 'That hint unlocks in {seconds}s.',
+  'hint.noSet': 'There is no SET on this board — tap “No SET on board”.',
+
+  'deal.deckEmpty': 'The deck is empty, so there are no more cards to deal.',
+  'deal.boardFull': 'The board is as large as it gets.',
 
   'feed.setFound': '{name} found a SET +1',
   'feed.setFoundYou': 'You found a SET +1',
   'feed.invalidClaim': "{name}'s claim was not a SET",
   'feed.invalidClaimYou': 'Not a SET',
   'feed.cardsAdded': '3 cards added',
+  'feed.cardsAddedAgreed': 'Everyone agreed — 3 cards added',
+  'feed.dealAsked': '{name} wants 3 more cards ({votes}/{needed})',
+  'feed.dealAskedYou': 'Asked for 3 more cards — waiting for the table ({votes}/{needed})',
+  'feed.dealWithdrew': '{name} no longer wants more cards',
+  'feed.dealWithdrewYou': 'Request withdrawn',
+  'feed.dealLapsed': 'Nobody else agreed, so the request lapsed',
+  'feed.hintUsed': '{name} took a hint',
   'feed.noSetRejected': '{name} called no SET, but there is one',
   'feed.playerJoined': '{name} joined',
   'feed.playerLeft': '{name} left',
@@ -168,6 +196,12 @@ export const en = {
     'The board refills itself back to twelve from the deck, so there are almost always twelve cards in front of you.',
   'tutorial.flowNoSet':
     'If nobody can find a SET, anyone may tap “No SET on board”. If the board really has none, three more cards are added (fifteen, then eighteen) and no card is replaced until it is back down to twelve.',
+  'tutorial.flowMoreCards':
+    'Stuck but not sure the board is dead? Tap “+3 cards”. Nothing happens until every player has tapped it, and then three cards are added — so one player can never blow up a position somebody else has already spotted.',
+  'tutorial.flowHints':
+    'After a minute on the same board, “Hint 1” marks one card that really is part of a SET. A minute later “Hint 2” marks two, which leaves exactly one card that can complete them. Both clocks restart whenever the board changes, and only you see your own hint.',
+  'tutorial.flowLastSet':
+    'When somebody claims a SET, the three cards appear at the top of the screen for a few seconds, so you can see what you missed.',
   'tutorial.flowDeck':
     'The counter at the top left shows how many cards are still in the deck, out of 81. The game ends when the deck is empty and no SET is left. Most SETs wins; an equal score is a tie.',
   'tutorial.gotIt': 'Got it',

@@ -14,7 +14,7 @@
 import { SET_SIZE, isCardId, type CardId } from './cards.js';
 import type { AttributeMismatch } from './rules.js';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** Room limits. */
 export const MIN_PLAYERS = 2;
@@ -32,6 +32,30 @@ export const RECONNECT_GRACE_MS = 60_000;
 export const MAX_MESSAGE_BYTES = 1_024;
 /** Rooms with no connected players are cleaned up after this long. */
 export const ROOM_IDLE_TTL_MS = 30 * 60_000;
+
+/**
+ * Largest board the table can build up to by agreeing to deal more cards.
+ *
+ * 21 is not arbitrary: the largest collection of SET cards containing no SET at
+ * all is 20 cards, so any 21 face-up cards are guaranteed to contain a SET.
+ * Beyond this size more cards can never help, and the grid stops fitting a phone.
+ */
+export const MAX_BOARD_SIZE = 21;
+/** How long an open request for more cards waits for the table before it lapses. */
+export const DEAL_VOTE_TTL_MS = 45_000;
+/** Time on an unchanged board before the first hint unlocks. */
+export const HINT_LEVEL_1_AFTER_MS = 60_000;
+/** ...and before the second, stronger hint unlocks. */
+export const HINT_LEVEL_2_AFTER_MS = 120_000;
+
+/** Hint 1 marks one card of a SET; hint 2 marks two, which fixes the third. */
+export type HintLevel = 1 | 2;
+
+/** Milliseconds a hint of each level takes to unlock. */
+export const HINT_DELAY_MS: Record<HintLevel, number> = {
+  1: HINT_LEVEL_1_AFTER_MS,
+  2: HINT_LEVEL_2_AFTER_MS,
+};
 
 export type GamePhase = 'lobby' | 'playing' | 'finished';
 
@@ -72,6 +96,18 @@ export interface PublicState {
   serverTime: number;
   minPlayers: number;
   maxPlayers: number;
+  /**
+   * Ids of the players currently asking for three more cards. Dealing needs
+   * every connected player in this list, so the count is also the progress bar.
+   */
+  dealVotes: string[];
+  /** When the open request lapses on its own; 0 when nobody is asking. */
+  dealVoteExpiresAt: number;
+  /**
+   * Server clock at the last board change. Both hint levels count from here, so
+   * the clock restarts whenever the position in front of the players changes.
+   */
+  boardSince: number;
 }
 
 /* ------------------------------------------------------------------ *
@@ -87,8 +123,31 @@ export type GameEvent =
   | { k: 'gameStarted' }
   | { k: 'setFound'; playerId: string; playerName: string; cards: CardId[]; score: number }
   | { k: 'invalidClaim'; playerId: string; playerName: string }
-  | { k: 'cardsAdded'; count: number; playerId: string; playerName: string }
+  /**
+   * Three cards went onto the board — either because a correct "no SET" call
+   * forced it (`noSet`) or because the whole table asked for them (`agreed`).
+   */
+  | {
+      k: 'cardsAdded';
+      count: number;
+      playerId: string;
+      playerName: string;
+      reason: 'noSet' | 'agreed';
+    }
   | { k: 'noSetRejected'; playerId: string; playerName: string }
+  /** A player asked for three more cards, or took their request back. */
+  | {
+      k: 'dealVote';
+      playerId: string;
+      playerName: string;
+      want: boolean;
+      votes: number;
+      needed: number;
+    }
+  /** Nobody else agreed in time, so the request was dropped. */
+  | { k: 'dealLapsed' }
+  /** Announced to everyone, without saying which cards — that stays private. */
+  | { k: 'hintUsed'; playerId: string; playerName: string; level: HintLevel }
   | { k: 'rematchWanted'; playerId: string; playerName: string }
   | { k: 'gameOver'; winnerIds: string[]; winnerNames: string[] };
 
@@ -124,6 +183,23 @@ export interface NoSetMessage {
   boardVersion: number;
 }
 
+/**
+ * "I want three more cards dealt" (`want: true`), or "never mind" (`want: false`).
+ * Cards are only dealt once every connected player is asking.
+ */
+export interface DealMessage {
+  t: 'deal';
+  want: boolean;
+  boardVersion: number;
+}
+
+/** Ask for a hint on the current board. Answered privately. */
+export interface HintMessage {
+  t: 'hint';
+  level: HintLevel;
+  boardVersion: number;
+}
+
 export interface RematchMessage {
   t: 'rematch';
 }
@@ -141,6 +217,8 @@ export type ClientMessage =
   | StartMessage
   | ClaimMessage
   | NoSetMessage
+  | DealMessage
+  | HintMessage
   | RematchMessage
   | LeaveMessage
   | PingMessage;
@@ -166,6 +244,10 @@ export type ClaimRejectReason =
   'not_a_set' | 'board_changed' | 'cooldown' | 'not_playing' | 'invalid_cards';
 
 export type NoSetRejectReason = 'set_exists' | 'cooldown' | 'not_playing' | 'board_changed';
+
+export type DealRejectReason = 'deck_empty' | 'board_full' | 'not_playing' | 'board_changed';
+
+export type HintRejectReason = 'too_soon' | 'no_set' | 'not_playing' | 'board_changed';
 
 export interface WelcomeMessage {
   t: 'welcome';
@@ -204,6 +286,35 @@ export interface NoSetRejectedMessage {
   serverTime: number;
 }
 
+/**
+ * The answer to a hint request, for the asking player only.
+ *
+ * `cards` holds the first `level` cards of a SET that really is on the board.
+ * It is deliberately not broadcast: everyone can ask for their own hint once the
+ * clock unlocks, and a broadcast would turn the timer into a race.
+ */
+export interface HintRevealedMessage {
+  t: 'hintRevealed';
+  level: HintLevel;
+  cards: CardId[];
+  /** The board this hint describes; the client drops it when the board moves on. */
+  boardVersion: number;
+}
+
+export interface HintRejectedMessage {
+  t: 'hintRejected';
+  reason: HintRejectReason;
+  /** For `too_soon`: server clock at which this level unlocks. */
+  availableAt: number;
+  serverTime: number;
+}
+
+/** Private feedback for a request for more cards that could not be registered. */
+export interface DealRejectedMessage {
+  t: 'dealRejected';
+  reason: DealRejectReason;
+}
+
 export interface ErrorMessage {
   t: 'error';
   code: ErrorCode;
@@ -224,6 +335,9 @@ export type ServerMessage =
   | EventMessage
   | ClaimRejectedMessage
   | NoSetRejectedMessage
+  | HintRevealedMessage
+  | HintRejectedMessage
+  | DealRejectedMessage
   | ErrorMessage
   | PongMessage;
 
@@ -335,6 +449,24 @@ export function parseClientMessage(raw: unknown): ParseResult<ClientMessage> {
         return { ok: false, error: 'noSet.boardVersion invalid' };
       }
       return { ok: true, value: { t: 'noSet', boardVersion: parsed['boardVersion'] } };
+    }
+    case 'deal': {
+      if (typeof parsed['want'] !== 'boolean') return { ok: false, error: 'deal.want invalid' };
+      if (!isBoardVersion(parsed['boardVersion'])) {
+        return { ok: false, error: 'deal.boardVersion invalid' };
+      }
+      return {
+        ok: true,
+        value: { t: 'deal', want: parsed['want'], boardVersion: parsed['boardVersion'] },
+      };
+    }
+    case 'hint': {
+      const level = parsed['level'];
+      if (level !== 1 && level !== 2) return { ok: false, error: 'hint.level must be 1 or 2' };
+      if (!isBoardVersion(parsed['boardVersion'])) {
+        return { ok: false, error: 'hint.boardVersion invalid' };
+      }
+      return { ok: true, value: { t: 'hint', level, boardVersion: parsed['boardVersion'] } };
     }
     case 'start':
       return { ok: true, value: { t: 'start' } };

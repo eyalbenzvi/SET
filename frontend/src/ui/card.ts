@@ -190,6 +190,13 @@ export function createCardElement(
   badge.setAttribute('aria-hidden', 'true');
   inner.appendChild(badge);
 
+  // Empty until a hint marks this card. Built up front so marking one never
+  // rebuilds the card and restarts its animations.
+  const hintMark = doc.createElement('span');
+  hintMark.className = 'card__hintMark';
+  hintMark.setAttribute('aria-hidden', 'true');
+  inner.appendChild(hintMark);
+
   if (options.colorAssist) {
     const marker = doc.createElement('span');
     marker.className = 'card__assist';
@@ -203,23 +210,46 @@ export function createCardElement(
 }
 
 /**
- * Update a card element's selected state.
+ * Update a card element's selected and hinted state.
  *
- * Selection is signalled through four independent channels — border, elevation,
- * a numbered badge and `aria-pressed` — so it never depends on colour alone.
+ * Both are signalled through several independent channels — border, elevation, a
+ * numbered badge, a corner mark and the accessible name — so neither one ever
+ * depends on colour alone.
+ *
+ * `position` is the card's 1-based place in the current selection, or 0 when it
+ * is not selected. `hinted` marks a card a hint pointed at.
  */
-export function setCardSelected(element: HTMLElement, position: number): void {
+export function setCardState(element: HTMLElement, position: number, hinted = false): void {
   const selected = position > 0;
   element.classList.toggle('card--selected', selected);
+  element.classList.toggle('card--hinted', hinted);
   element.setAttribute('aria-pressed', selected ? 'true' : 'false');
   const badge = element.querySelector<HTMLElement>('.card__badge');
   if (badge) badge.textContent = selected ? String(position) : '';
+  const mark = element.querySelector<HTMLElement>('.card__hintMark');
+  if (mark) mark.textContent = hinted ? '?' : '';
   const id = Number(element.dataset['cardId']);
-  const base = cardLabel(cardById(id));
-  element.setAttribute(
-    'aria-label',
-    selected ? `${base}, ${t('game.selectedPosition', { index: position })}` : base,
-  );
+  const notes: string[] = [];
+  if (selected) notes.push(t('game.selectedPosition', { index: position }));
+  if (hinted) notes.push(t('game.hintedCard'));
+  element.setAttribute('aria-label', [cardLabel(cardById(id)), ...notes].join(', '));
+}
+
+/**
+ * A small, non-interactive card face.
+ *
+ * Used to show a set after its cards have already left the board, where a real
+ * card button would be a focus stop that does nothing.
+ */
+export function createMiniCard(doc: Document, id: CardId): HTMLElement {
+  const card = cardById(id);
+  const node = doc.createElement('span');
+  node.className = 'miniCard';
+  node.dataset['cardId'] = String(id);
+  node.setAttribute('role', 'img');
+  node.setAttribute('aria-label', cardLabel(card));
+  node.appendChild(createArtwork(doc, card));
+  return node;
 }
 
 /** Add a one-shot animation class, cleaned up when the animation ends. */

@@ -182,55 +182,80 @@ export async function expectNoHorizontalScroll(page: Page): Promise<void> {
   expect(overflow.bodyScrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1);
 }
 
+/** True once this player is looking at the results screen. */
+async function isFinished(page: Page): Promise<boolean> {
+  return page
+    .getByTestId('results-headline')
+    .isVisible()
+    .catch(() => false);
+}
+
+/**
+ * Wait until this player is free to act.
+ *
+ * "No SET on board" is disabled for exactly one reason — this player's own
+ * five-second cooldown — so it doubles as the "am I cooling down?" signal.
+ */
+async function waitOutCooldown(page: Page): Promise<void> {
+  await expect(page.getByTestId('no-set')).toBeEnabled({ timeout: 15_000 });
+}
+
+/**
+ * Unpick anything still selected.
+ *
+ * A claim that did not go through leaves three cards picked, and picking three
+ * more on top of them is refused — so a loop that does not clear up after itself
+ * spends the rest of the game re-claiming the same stale triple.
+ */
+async function clearSelection(page: Page): Promise<void> {
+  for (const card of await page.locator('.card--selected').all()) {
+    await card.click({ timeout: 5_000 }).catch(() => undefined);
+  }
+  await expect(page.locator('.card--selected')).toHaveCount(0, { timeout: 5_000 });
+}
+
 /**
  * Play a whole game out by having players alternately claim any available set,
  * or call "no SET" when the board has none. Returns when the game finishes.
  */
 export async function playToCompletion(players: PlayerSession[]): Promise<void> {
-  let turn = 0;
-  for (;;) {
-    expect(turn++, 'game did not finish in a reasonable number of actions').toBeLessThan(90);
-    const actor = players[turn % players.length]!;
-    if (
-      await actor.page
-        .getByTestId('results-headline')
-        .isVisible()
-        .catch(() => false)
-    )
-      return;
+  // A full game is at most 27 claims plus a handful of "no SET" calls; the budget
+  // is deliberately loose, because a lost race costs an action without progress.
+  for (let action = 0; action < 150; action++) {
+    const actor = players[action % players.length]!;
+    if (await isFinished(actor.page)) return;
+    await waitOutCooldown(actor.page);
+    await clearSelection(actor.page);
+
     const board = await boardCardIds(actor.page);
     if (board.length === 0) return;
     const found = findFirstSet(board);
-    if (found) {
-      const before = await actor.page.getByTestId('board').getAttribute('aria-label');
-      for (const id of found) {
-        await actor.page.locator(`.card[data-card-id="${id}"]`).click({ timeout: 5_000 });
-      }
-      const claim = actor.page.getByTestId('claim');
-      if (await claim.isEnabled()) await claim.click();
-      // Wait for the authoritative board to change before the next action.
-      await actor.page
-        .waitForFunction(
-          (ids: number[]) =>
-            !ids.every((id) =>
-              document.querySelector(`.card[data-card-id="${id}"]:not(.card--exit)`),
-            ),
-          [...found],
-          { timeout: 10_000 },
-        )
-        .catch(() => undefined);
-      void before;
-    } else {
+    if (!found) {
       const noSet = actor.page.getByTestId('no-set');
       if (await noSet.isEnabled()) await noSet.click();
       await actor.page.waitForTimeout(250);
+      continue;
     }
-    if (
-      await actor.page
-        .getByTestId('results-headline')
-        .isVisible()
-        .catch(() => false)
-    )
-      return;
+
+    for (const id of found) {
+      await actor.page.locator(`.card[data-card-id="${id}"]`).click({ timeout: 5_000 });
+    }
+    const claim = actor.page.getByTestId('claim');
+    if (!(await claim.isEnabled())) continue;
+    await claim.click();
+    // Wait for the authoritative board to move on. It may not: another player can
+    // take the same set first, in which case the next pass simply tries again.
+    await actor.page
+      .waitForFunction(
+        (ids: number[]) =>
+          !ids.every((id) =>
+            document.querySelector(`.card[data-card-id="${id}"]:not(.card--exit)`),
+          ),
+        [...found],
+        { timeout: 10_000 },
+      )
+      .catch(() => undefined);
+    if (await isFinished(actor.page)) return;
   }
+  throw new Error('game did not finish in a reasonable number of actions');
 }

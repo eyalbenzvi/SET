@@ -10,7 +10,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   INITIAL_BOARD_SIZE,
   MAX_MESSAGE_BYTES,
+  MAX_BOARD_SIZE,
   MAX_PLAYERS,
+  PROTOCOL_VERSION,
   findFirstSet,
   hasSet,
   isSetByIds,
@@ -92,7 +94,7 @@ describe('HTTP surface', () => {
   it('reports health and the protocol version', async () => {
     const response = await fetch(`${BASE_URL}/health`);
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, protocol: 1 });
+    expect(await response.json()).toEqual({ ok: true, protocol: PROTOCOL_VERSION });
   });
 
   it('mints a room code from the safe alphabet', async () => {
@@ -580,5 +582,121 @@ describe('disconnect, host succession and reconnect', () => {
     resumed.send({ t: 'claim', cards, boardVersion: state.boardVersion });
     const event = await guest.waitForEvent('setFound');
     expect(event.playerId).toBe(hostSeat.playerId);
+  });
+});
+
+describe('dealing more cards by agreement, over the wire', () => {
+  it('waits for the whole table, then deals three cards to everyone', async () => {
+    const { host, guest } = await playing();
+    const state = host.state();
+
+    host.send({ t: 'deal', want: true, boardVersion: state.boardVersion });
+    const asked = await guest.waitForEvent('dealVote');
+    expect(asked).toMatchObject({ playerName: 'Maya', want: true, votes: 1, needed: 2 });
+    // One player is not enough: the board must be untouched.
+    expect(guest.state().board).toEqual(state.board);
+    expect(guest.state().dealVotes).toEqual([host.playerId]);
+
+    guest.send({ t: 'deal', want: true, boardVersion: state.boardVersion });
+    const added = await host.waitForEvent('cardsAdded');
+    expect(added).toMatchObject({ count: 3, reason: 'agreed' });
+    for (const client of [host, guest]) {
+      const grown = await client.waitForState((s) => s.board.length === INITIAL_BOARD_SIZE + 3);
+      expect(grown.board.slice(0, INITIAL_BOARD_SIZE)).toEqual(state.board);
+      expect(grown.deckRemaining).toBe(state.deckRemaining - 3);
+      expect(grown.dealVotes).toEqual([]);
+      expect(grown.players.every((p) => p.cooldownUntil === 0)).toBe(true);
+    }
+  });
+
+  it('lets a player withdraw, and tells the table', async () => {
+    const { host, guest } = await playing();
+    const version = host.state().boardVersion;
+    host.send({ t: 'deal', want: true, boardVersion: version });
+    await guest.waitForEvent('dealVote');
+
+    const since = guest.mark();
+    host.send({ t: 'deal', want: false, boardVersion: version });
+    const withdrawn = await guest.waitForEvent('dealVote', 5_000, since);
+    expect(withdrawn).toMatchObject({ want: false, votes: 0 });
+    expect(guest.state().dealVotes).toEqual([]);
+    expect(guest.state().board).toHaveLength(INITIAL_BOARD_SIZE);
+  });
+
+  it('cancels an open request when somebody claims a set instead', async () => {
+    const { host, guest } = await playingWhere(hasSet);
+    const state = host.state();
+    host.send({ t: 'deal', want: true, boardVersion: state.boardVersion });
+    await guest.waitForState((s) => s.dealVotes.length === 1);
+
+    guest.send({ t: 'claim', cards: setOn(state), boardVersion: state.boardVersion });
+    const after = await host.waitForState((s) => s.boardVersion !== state.boardVersion);
+    expect(after.dealVotes).toEqual([]);
+    expect(after.dealVoteExpiresAt).toBe(0);
+    expect(after.board).toHaveLength(INITIAL_BOARD_SIZE);
+  });
+
+  it('refuses to grow the board past the cap', async () => {
+    const { host, guest } = await playing();
+    for (let size = INITIAL_BOARD_SIZE; size < MAX_BOARD_SIZE; size += 3) {
+      const version = host.state().boardVersion;
+      host.send({ t: 'deal', want: true, boardVersion: version });
+      guest.send({ t: 'deal', want: true, boardVersion: version });
+      await host.waitForState((s) => s.board.length === size + 3);
+    }
+    host.send({ t: 'deal', want: true, boardVersion: host.state().boardVersion });
+    const rejection = await host.waitFor((m) => m.t === 'dealRejected');
+    expect(rejection).toMatchObject({ reason: 'board_full' });
+    expect(host.state().board).toHaveLength(MAX_BOARD_SIZE);
+  }, 180_000);
+});
+
+describe('hints, over the wire', () => {
+  it('is locked at the start of a board, and says when it opens', async () => {
+    const { host, guest } = await playing();
+    const state = host.state();
+    const since = guest.mark();
+
+    host.send({ t: 'hint', level: 1, boardVersion: state.boardVersion });
+    const rejection = await host.waitFor((m) => m.t === 'hintRejected');
+    expect(rejection).toMatchObject({ reason: 'too_soon' });
+    if (rejection.t !== 'hintRejected') throw new Error('unreachable');
+    expect(rejection.availableAt - rejection.serverTime).toBeGreaterThan(50_000);
+
+    // A locked hint is not an event: the other player is told nothing at all.
+    await sleep(150);
+    expect(guest.received.slice(since).some((m) => m.t === 'event')).toBe(false);
+    expect(guest.received.some((m) => m.t === 'hintRejected')).toBe(false);
+  });
+
+  it('rejects a hint asked about a board that has already changed', async () => {
+    const { host, guest } = await playingWhere(hasSet);
+    const state = host.state();
+    guest.send({ t: 'claim', cards: setOn(state), boardVersion: state.boardVersion });
+    await host.waitForState((s) => s.boardVersion !== state.boardVersion);
+
+    host.send({ t: 'hint', level: 2, boardVersion: state.boardVersion });
+    expect(await host.waitFor((m) => m.t === 'hintRejected')).toMatchObject({
+      reason: 'board_changed',
+    });
+  });
+
+  it('validates the level before it reaches the room', async () => {
+    const { host } = await playing();
+    host.sendRaw(JSON.stringify({ t: 'hint', level: 3, boardVersion: host.state().boardVersion }));
+    const error = await host.waitFor((m) => m.t === 'error');
+    expect(error).toMatchObject({ code: 'invalid_message', fatal: false });
+    // The room is still perfectly usable afterwards.
+    host.send({ t: 'hint', level: 1, boardVersion: host.state().boardVersion });
+    expect(await host.waitFor((m) => m.t === 'hintRejected')).toMatchObject({ reason: 'too_soon' });
+  });
+
+  it('never puts the hint clock or a set into the public snapshot', async () => {
+    const { host } = await playing();
+    const state = host.state();
+    expect(typeof state.boardSince).toBe('number');
+    expect(Object.keys(state)).not.toContain('deck');
+    // `boardSince` is a timestamp, not a hint: it says when the board appeared.
+    expect(state.boardSince).toBeLessThanOrEqual(state.serverTime);
   });
 });

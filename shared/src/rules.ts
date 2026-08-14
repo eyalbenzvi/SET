@@ -131,8 +131,11 @@ export function hasSet(ids: readonly CardId[]): boolean {
 }
 
 /**
- * The first valid SET among `ids`, or `null`. Used only by tests and tooling —
- * the server never reveals a set to players.
+ * The first valid SET among `ids`, in board order, or `null`.
+ *
+ * The server calls this in exactly one place: answering a hint request, where it
+ * reveals the first one or two of these cards to the player who asked. Nothing
+ * else ever tells a client where a set is.
  */
 export function findFirstSet(ids: readonly CardId[]): SetTriple | null {
   for (let i = 0; i < ids.length; i++) {

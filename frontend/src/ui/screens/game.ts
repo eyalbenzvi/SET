@@ -10,13 +10,20 @@
  * the primary controls can never be pushed off a small screen.
  */
 
-import { SET_SIZE, type CardId } from '@set/shared';
-import { t } from '../../i18n/index.js';
+import { MAX_BOARD_SIZE, SET_SIZE, type CardId, type HintLevel } from '@set/shared';
+import { t, type StringKey } from '../../i18n/index.js';
 import type { Effect, Store } from '../../state/store.js';
 import { selectionIndex } from '../../state/selection.js';
-import { createCardElement, flashCard, setCardSelected } from '../card.js';
+import { createCardElement, createMiniCard, flashCard, setCardState } from '../card.js';
 import { button, el, prefersReducedMotion } from '../dom.js';
 import { computeLayout } from '../grid.js';
+
+/** Seconds as `m:ss`, so a two-minute countdown stays two characters wide. */
+function formatClock(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}:${String(seconds).padStart(2, '0')}` : String(seconds);
+}
 
 export class GameScreen {
   readonly root: HTMLElement;
@@ -27,6 +34,15 @@ export class GameScreen {
   private readonly noSetButton: HTMLButtonElement;
   private readonly deckCounter: HTMLElement;
   private readonly setsCounter: HTMLElement;
+  /** Hint level 1 and 2, unlocking on time spent on the current board. */
+  private readonly hintButtons: Record<HintLevel, HTMLButtonElement>;
+  /** Asks the table for three more cards; also shows how many have agreed. */
+  private readonly moreButton: HTMLButtonElement;
+  /** "X took [three cards]" — what the set actually was. */
+  private readonly lastSet: HTMLElement;
+  private readonly lastSetText: HTMLElement;
+  private readonly lastSetCards: HTMLElement;
+  private lastSetId = -1;
   /** Card elements by card id, reused while the card stays on the board. */
   private readonly cardElements = new Map<CardId, HTMLButtonElement>();
   /** Layer holding cards that are animating off the board. */
@@ -80,6 +96,23 @@ export class GameScreen {
       attrs: { 'data-testid': 'leave-game' },
     });
 
+    this.hintButtons = {
+      1: this.hintButton(1),
+      2: this.hintButton(2),
+    };
+    this.moreButton = button(t('game.moreCards'), 'ghost', () => this.store.toggleMoreCards(), {
+      class: 'btn--chip',
+      attrs: { 'data-testid': 'more-cards' },
+    });
+
+    this.lastSetText = el('span', { class: 'lastSet__who' });
+    this.lastSetCards = el('span', { class: 'lastSet__cards' });
+    this.lastSet = el('div', {
+      class: 'lastSet',
+      attrs: { 'data-testid': 'last-set', hidden: 'hidden' },
+      children: [this.lastSetText, this.lastSetCards],
+    });
+
     this.root = el('div', {
       class: 'screen screen--game',
       children: [
@@ -115,13 +148,23 @@ export class GameScreen {
                 this.leaveButton,
               ],
             }),
-            this.feed,
+            // One row, one height: the feed line and the set that was just taken
+            // share it and never both show, so the board is never resized by a
+            // message appearing or expiring under it.
+            el('div', { class: 'headline', children: [this.feed, this.lastSet] }),
           ],
         }),
         el('main', { class: 'boardWrap', children: [this.board, this.ghosts] }),
         el('footer', {
           class: 'actionBar',
           children: [
+            // Table aids sit above the two decisive buttons, in a smaller size:
+            // they are things you reach for occasionally, and mixing them into the
+            // same row as "Claim SET" would invite a mis-tap in a race.
+            el('div', {
+              class: 'actionBar__aids',
+              children: [this.hintButtons[1], this.hintButtons[2], this.moreButton],
+            }),
             this.feedback,
             el('div', {
               class: 'actionBar__buttons',
@@ -166,7 +209,18 @@ export class GameScreen {
     this.updateBoard();
     this.updateActions();
     this.updateFeed();
+    this.updateLastSet();
     this.updateLayout();
+  }
+
+  /** One hint button. Level 2 marks two cards, which fixes the third. */
+  private hintButton(level: HintLevel): HTMLButtonElement {
+    return button(
+      t(`game.hint${level}` as StringKey),
+      'ghost',
+      () => this.store.requestHint(level),
+      { class: 'btn--chip', attrs: { 'data-testid': `hint-${level}` } },
+    );
   }
 
   /* ---------------------------------------------------------------- *
@@ -256,6 +310,7 @@ export class GameScreen {
     // Patch the DOM in place rather than replacing it wholesale: detaching and
     // re-attaching a focused element blurs it, which would strand keyboard and
     // screen-reader users on every board update.
+    const hinted = new Set(this.store.activeHint()?.cards ?? []);
     room.board.forEach((id, slot) => {
       let element = this.cardElements.get(id);
       if (!element) {
@@ -263,7 +318,7 @@ export class GameScreen {
         this.cardElements.set(id, element);
         if (!prefersReducedMotion()) element.classList.add('card--enter');
       }
-      setCardSelected(element, selectionIndex(state.selection, id));
+      setCardState(element, selectionIndex(state.selection, id), hinted.has(id));
       const current = this.board.children[slot];
       if (current !== element) this.board.insertBefore(element, current ?? null);
     });
@@ -298,6 +353,80 @@ export class GameScreen {
     const feedback = state.feedback;
     this.feedback.textContent = feedback?.text ?? (cooling ? '' : t('game.selectThree'));
     this.feedback.dataset['tone'] = feedback?.tone ?? 'muted';
+
+    this.updateAids();
+  }
+
+  /**
+   * The hint countdowns and the request for more cards.
+   *
+   * Runs on the same 250ms tick as the cooldown, so both countdowns stay live
+   * without a timer of their own.
+   */
+  private updateAids(): void {
+    const room = this.store.getState().room;
+    if (!room) return;
+
+    const revealed = this.store.activeHint()?.level ?? 0;
+    for (const level of [1, 2] as const) {
+      const node = this.hintButtons[level];
+      const label = t(`game.hint${level}` as StringKey);
+      const seconds = this.store.hintUnlockSeconds(level);
+      const used = revealed >= level;
+      node.disabled = seconds > 0 || used;
+      node.classList.toggle('btn--done', used);
+      node.textContent = used
+        ? t('game.hintTaken', { label })
+        : seconds > 0
+          ? t('game.hintLocked', { label, clock: formatClock(seconds) })
+          : label;
+    }
+
+    const { votes, needed } = this.store.dealProgress();
+    const mine = this.store.iWantMoreCards();
+    const possible =
+      room.deckRemaining >= SET_SIZE && room.board.length + SET_SIZE <= MAX_BOARD_SIZE;
+    this.moreButton.disabled = !possible;
+    this.moreButton.classList.toggle('btn--armed', mine);
+    // Somebody is waiting on an answer from this player: make it look like a
+    // question rather than another idle chip.
+    this.moreButton.classList.toggle('btn--asking', votes > 0 && !mine);
+    this.moreButton.textContent = mine
+      ? t('game.moreCardsWaiting', { votes, needed })
+      : votes > 0
+        ? t('game.moreCardsAgree', { votes, needed })
+        : t('game.moreCards');
+  }
+
+  /**
+   * Show the set that was just taken. The cards are rebuilt only when a new set
+   * arrives, so the strip is not re-created on every unrelated state update.
+   */
+  private updateLastSet(): void {
+    const entry = this.store.getState().lastSet;
+    if (!entry) {
+      if (this.lastSetId !== -1) {
+        this.lastSetId = -1;
+        this.lastSet.hidden = true;
+        this.feed.hidden = false;
+        this.lastSetCards.replaceChildren();
+      }
+      return;
+    }
+    if (entry.id === this.lastSetId) return;
+    this.lastSetId = entry.id;
+    // The feed would only repeat this in words.
+    this.feed.hidden = true;
+    this.lastSetText.textContent = entry.byMe
+      ? t('game.lastSetYou')
+      : t('game.lastSet', { name: entry.playerName });
+    this.lastSetCards.replaceChildren(...entry.cards.map((id) => createMiniCard(document, id)));
+    this.lastSet.hidden = false;
+    if (!prefersReducedMotion()) {
+      this.lastSet.classList.remove('lastSet--in');
+      void this.lastSet.offsetWidth;
+      this.lastSet.classList.add('lastSet--in');
+    }
   }
 
   /**

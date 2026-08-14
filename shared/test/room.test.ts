@@ -1,20 +1,33 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { INITIAL_BOARD_SIZE, cardById, type CardId } from '../src/cards.js';
+import { INITIAL_BOARD_SIZE, SET_SIZE, cardById, type CardId } from '../src/cards.js';
 import {
+  DEAL_VOTE_TTL_MS,
+  HINT_LEVEL_1_AFTER_MS,
+  HINT_LEVEL_2_AFTER_MS,
   INVALID_ACTION_COOLDOWN_MS,
+  MAX_BOARD_SIZE,
   MAX_PLAYERS,
   MIN_PLAYERS,
   PROTOCOL_VERSION,
   RECONNECT_GRACE_MS,
   ROOM_IDLE_TTL_MS,
   type ClaimRejectedMessage,
+  type DealRejectedMessage,
   type EventMessage,
   type GameEvent,
   type GameEventKind,
+  type HintRejectedMessage,
+  type HintRevealedMessage,
   type NoSetRejectedMessage,
   type ServerMessage,
 } from '../src/protocol.js';
-import { findAllSetsByIds, findFirstSet, hasSet, isSetByIds } from '../src/rules.js';
+import {
+  findAllSetsByIds,
+  findFirstSet,
+  findRequiredThirdCardId,
+  hasSet,
+  isSetByIds,
+} from '../src/rules.js';
 import { GameRoom, checkRoomInvariants, type Emission, type RoomEnv } from '../src/room.js';
 import { seededRandom } from '../src/shuffle.js';
 
@@ -919,6 +932,39 @@ describe('persistence', () => {
     expect(guest.playerId).toBeTruthy();
   });
 
+  it('carries an open request for more cards through a restart', () => {
+    const { room, env, host } = startedRoom();
+    room.voteDeal(host.playerId, true, room.getBoardVersion());
+    const restored = GameRoom.deserialize(JSON.parse(JSON.stringify(room.serialize())), env);
+    expect(restored.snapshot().dealVotes).toEqual([host.playerId]);
+    expect(restored.snapshot().dealVoteExpiresAt).toBe(env.now() + DEAL_VOTE_TTL_MS);
+    expect(restored.snapshot().boardSince).toBe(room.snapshot().boardSince);
+  });
+
+  it('loads a room stored before hints and shared dealing existed', () => {
+    const { room, env, host } = startedRoom();
+    // Exactly what version 1 wrote: no votes, no hint clock.
+    const v1 = JSON.parse(JSON.stringify(room.serialize())) as Record<string, unknown>;
+    v1['s'] = 1;
+    delete v1['dealVotes'];
+    delete v1['dealVoteExpiresAt'];
+    delete v1['boardSince'];
+
+    env.advance(HINT_LEVEL_2_AFTER_MS);
+    const restored = GameRoom.deserialize(v1 as never, env);
+    expect(restored.getPhase()).toBe('playing');
+    expect(restored.getBoard()).toEqual(room.getBoard());
+    expect(restored.snapshot().dealVotes).toEqual([]);
+    expect(restored.snapshot().dealVoteExpiresAt).toBe(0);
+    // The hint clock starts now rather than handing out a free hint on load.
+    expect(restored.snapshot().boardSince).toBe(env.now());
+    const resumed = restored.join({ name: 'Maya', playerId: host.playerId, token: host.token });
+    expect(resumed.ok).toBe(true);
+    expect(
+      privateMessages(restored.hint(host.playerId, 1, restored.getBoardVersion()), 'hintRejected'),
+    ).toHaveLength(1);
+  });
+
   it('still rejects a wrong token after a restart', () => {
     const { room, env, host } = startedRoom();
     const restored = GameRoom.deserialize(JSON.parse(JSON.stringify(room.serialize())), env);
@@ -928,5 +974,313 @@ describe('persistence', () => {
       token: 'nope1234abcd',
     });
     expect(attempt.ok).toBe(false);
+  });
+});
+
+/** Everybody asks for three more cards, in seat order. Returns the last batch. */
+function agreeToDeal(room: GameRoom, seats: Seat[]): Emission[] {
+  let last: Emission[] = [];
+  for (const seat of seats) {
+    last = room.voteDeal(seat.playerId, true, room.getBoardVersion());
+  }
+  return last;
+}
+
+/** A mid-game room whose deck has run out but which is still being played. */
+function drainedDeckRoom(): { room: GameRoom; host: Seat; guest: Seat } {
+  for (let seed = 1; seed < 400; seed++) {
+    const { room, host, guest } = startedRoom(seed);
+    let guard = 0;
+    while (room.getPhase() === 'playing' && room.getDeckRemaining() > 0 && guard++ < 100) {
+      const player = guard % 2 === 0 ? host : guest;
+      if (hasSet(room.getBoard())) {
+        room.claim(player.playerId, setOnBoard(room), room.getBoardVersion());
+      } else {
+        room.noSet(player.playerId, room.getBoardVersion());
+      }
+    }
+    if (room.getPhase() === 'playing' && room.getDeckRemaining() === 0) {
+      return { room, host, guest };
+    }
+  }
+  throw new Error('no seed left the deck empty with the game still running');
+}
+
+describe('dealing more cards by agreement', () => {
+  it('does nothing on one player’s request, and says how many have agreed', () => {
+    const { room, host, guest } = startedRoom();
+    const before = [...room.getBoard()];
+    const version = room.getBoardVersion();
+
+    const emissions = room.voteDeal(host.playerId, true, version);
+
+    expect(room.getBoard()).toEqual(before);
+    expect(room.getBoardVersion()).toBe(version);
+    expect(firstEvent(emissions, 'dealVote')).toMatchObject({
+      playerId: host.playerId,
+      want: true,
+      votes: 1,
+      needed: 2,
+    });
+    expect(room.snapshot().dealVotes).toEqual([host.playerId]);
+    expect(room.snapshot().dealVoteExpiresAt).toBeGreaterThan(0);
+    expect(guest.playerId).toBeTruthy();
+  });
+
+  it('deals exactly three cards once every connected player agrees', () => {
+    const { room, host, guest } = startedRoom();
+    const before = [...room.getBoard()];
+    const deckBefore = room.getDeckRemaining();
+    const version = room.getBoardVersion();
+
+    room.voteDeal(host.playerId, true, version);
+    const emissions = room.voteDeal(guest.playerId, true, version);
+
+    expect(firstEvent(emissions, 'cardsAdded')).toMatchObject({ count: 3, reason: 'agreed' });
+    expect(room.getBoard()).toHaveLength(INITIAL_BOARD_SIZE + SET_SIZE);
+    // The cards that were already out keep their slots, so nothing moves.
+    expect(room.getBoard().slice(0, INITIAL_BOARD_SIZE)).toEqual(before);
+    expect(room.getDeckRemaining()).toBe(deckBefore - SET_SIZE);
+    expect(room.getBoardVersion()).toBe(version + 1);
+    expect(room.snapshot().dealVotes).toEqual([]);
+    expect(room.snapshot().dealVoteExpiresAt).toBe(0);
+    expect(checkRoomInvariants(room)).toEqual([]);
+  });
+
+  it('never costs anybody a cooldown', () => {
+    const { room, host, guest } = startedRoom();
+    agreeToDeal(room, [host, guest]);
+    for (const player of room.snapshot().players) expect(player.cooldownUntil).toBe(0);
+  });
+
+  it('lets a player take their request back', () => {
+    const { room, host, guest } = startedRoom();
+    room.voteDeal(host.playerId, true, room.getBoardVersion());
+    const emissions = room.voteDeal(host.playerId, false, room.getBoardVersion());
+
+    expect(firstEvent(emissions, 'dealVote')).toMatchObject({ want: false, votes: 0 });
+    expect(room.snapshot().dealVotes).toEqual([]);
+    expect(room.snapshot().dealVoteExpiresAt).toBe(0);
+
+    // ...and the other player agreeing alone is then not enough.
+    room.voteDeal(guest.playerId, true, room.getBoardVersion());
+    expect(room.getBoard()).toHaveLength(INITIAL_BOARD_SIZE);
+  });
+
+  it('ignores a repeated request from the same player', () => {
+    const { room, host } = startedRoom();
+    room.voteDeal(host.playerId, true, room.getBoardVersion());
+    expect(room.voteDeal(host.playerId, true, room.getBoardVersion())).toEqual([]);
+    expect(room.snapshot().dealVotes).toEqual([host.playerId]);
+    expect(room.voteDeal(host.playerId, false, room.getBoardVersion())).not.toEqual([]);
+    expect(room.voteDeal(host.playerId, false, room.getBoardVersion())).toEqual([]);
+  });
+
+  it('lapses on its own when the table never answers', () => {
+    const { room, env, host } = startedRoom();
+    room.voteDeal(host.playerId, true, room.getBoardVersion());
+    expect(room.nextTimerAt()).toBe(env.now() + DEAL_VOTE_TTL_MS);
+
+    env.advance(DEAL_VOTE_TTL_MS - 1);
+    expect(eventsOf(room.tick())).toEqual([]);
+    env.advance(1);
+    expect(eventsOf(room.tick())).toEqual(['dealLapsed']);
+    expect(room.snapshot().dealVotes).toEqual([]);
+    expect(room.getBoard()).toHaveLength(INITIAL_BOARD_SIZE);
+  });
+
+  it('cancels an open request when the board changes underneath it', () => {
+    const { room, host, guest } = startedRoom();
+    room.voteDeal(host.playerId, true, room.getBoardVersion());
+    room.claim(guest.playerId, setOnBoard(room), room.getBoardVersion());
+    expect(room.snapshot().dealVotes).toEqual([]);
+    expect(room.snapshot().dealVoteExpiresAt).toBe(0);
+    expect(room.nextTimerAt()).toBeNull();
+  });
+
+  it('rejects a request made against a board that has already moved on', () => {
+    const { room, host } = startedRoom();
+    const emissions = room.voteDeal(host.playerId, true, room.getBoardVersion() - 1);
+    expect(
+      (privateMessages(emissions, 'dealRejected')[0]!.message as DealRejectedMessage).reason,
+    ).toBe('board_changed');
+    expect(room.snapshot().dealVotes).toEqual([]);
+  });
+
+  it('is rejected outside the playing phase', () => {
+    const env = testEnv();
+    const room = new GameRoom('ABC234', env);
+    const host = join(room, 'Maya');
+    const emissions = room.voteDeal(host.playerId, true, 0);
+    expect(
+      (privateMessages(emissions, 'dealRejected')[0]!.message as DealRejectedMessage).reason,
+    ).toBe('not_playing');
+  });
+
+  it('stops at the board cap, because 21 cards always contain a SET', () => {
+    const { room, host, guest } = startedRoom();
+    const seats = [host, guest];
+    for (let size = INITIAL_BOARD_SIZE; size < MAX_BOARD_SIZE; size += SET_SIZE) {
+      agreeToDeal(room, seats);
+      expect(room.getBoard()).toHaveLength(size + SET_SIZE);
+    }
+    expect(room.getBoard()).toHaveLength(MAX_BOARD_SIZE);
+
+    const emissions = room.voteDeal(host.playerId, true, room.getBoardVersion());
+    expect(
+      (privateMessages(emissions, 'dealRejected')[0]!.message as DealRejectedMessage).reason,
+    ).toBe('board_full');
+    expect(room.getBoard()).toHaveLength(MAX_BOARD_SIZE);
+    expect(checkRoomInvariants(room)).toEqual([]);
+  });
+
+  it('refuses when the deck has nothing left to deal', () => {
+    const { room, host } = drainedDeckRoom();
+    const emissions = room.voteDeal(host.playerId, true, room.getBoardVersion());
+    expect(
+      (privateMessages(emissions, 'dealRejected')[0]!.message as DealRejectedMessage).reason,
+    ).toBe('deck_empty');
+  });
+
+  it('completes the request when the only player who had not agreed drops out', () => {
+    const { room, host, guest } = startedRoom();
+    room.voteDeal(host.playerId, true, room.getBoardVersion());
+    const emissions = room.disconnect(guest.playerId);
+
+    // Everyone still at the table (just the host) is asking, so the cards go out.
+    expect(eventsOf(emissions)).toContain('cardsAdded');
+    expect(firstEvent(emissions, 'cardsAdded')).toMatchObject({ reason: 'agreed' });
+    expect(room.getBoard()).toHaveLength(INITIAL_BOARD_SIZE + SET_SIZE);
+  });
+
+  it('drops the vote of a player who leaves without dealing behind their back', () => {
+    // A three-player table, so the one who asked is not the whole room.
+    const env = testEnv();
+    const room = new GameRoom('ABC234', env);
+    const host = join(room, 'Maya');
+    const guest = join(room, 'David');
+    join(room, 'Noa');
+    expect(room.start(host.playerId).ok).toBe(true);
+
+    room.voteDeal(guest.playerId, true, room.getBoardVersion());
+    const emissions = room.leave(guest.playerId);
+
+    expect(eventsOf(emissions)).not.toContain('cardsAdded');
+    expect(room.snapshot().dealVotes).toEqual([]);
+    expect(room.getBoard()).toHaveLength(INITIAL_BOARD_SIZE);
+    expect(room.nextTimerAt()).toBeNull();
+  });
+});
+
+describe('hints', () => {
+  it('is locked for the first minute on a board', () => {
+    const { room, env, host } = startedRoom();
+    const emissions = room.hint(host.playerId, 1, room.getBoardVersion());
+    const rejection = privateMessages(emissions, 'hintRejected')[0]!.message as HintRejectedMessage;
+    expect(rejection.reason).toBe('too_soon');
+    expect(rejection.availableAt).toBe(env.now() + HINT_LEVEL_1_AFTER_MS);
+    // Nothing about the board leaks in a locked answer.
+    expect(JSON.stringify(emissions)).not.toContain('cards');
+    expect(eventsOf(emissions)).toEqual([]);
+  });
+
+  it('marks one real card of a SET after a minute, privately', () => {
+    const { room, env, host, guest } = startedRoom();
+    env.advance(HINT_LEVEL_1_AFTER_MS);
+
+    const emissions = room.hint(host.playerId, 1, room.getBoardVersion());
+    const revealed = privateMessages(emissions, 'hintRevealed');
+    expect(revealed).toHaveLength(1);
+    expect(revealed[0]!.playerId).toBe(host.playerId);
+    const message = revealed[0]!.message as HintRevealedMessage;
+    expect(message.level).toBe(1);
+    expect(message.cards).toHaveLength(1);
+    expect(message.boardVersion).toBe(room.getBoardVersion());
+
+    // The card really is part of a set that is on the board right now.
+    const card = message.cards[0]!;
+    expect(room.getBoard()).toContain(card);
+    expect(findAllSetsByIds(room.getBoard()).some((set) => set.includes(card))).toBe(true);
+
+    // Everyone hears that a hint was taken; nobody hears which card.
+    const event = firstEvent(emissions, 'hintUsed');
+    expect(event).toMatchObject({ playerId: host.playerId, level: 1 });
+    expect(Object.keys(event)).not.toContain('cards');
+    expect(guest.playerId).toBeTruthy();
+  });
+
+  it('keeps the second hint locked until a second minute has passed', () => {
+    const { room, env, host } = startedRoom();
+    env.advance(HINT_LEVEL_1_AFTER_MS);
+    const early = room.hint(host.playerId, 2, room.getBoardVersion());
+    const rejection = privateMessages(early, 'hintRejected')[0]!.message as HintRejectedMessage;
+    expect(rejection.reason).toBe('too_soon');
+    expect(rejection.availableAt).toBe(rejection.serverTime + HINT_LEVEL_1_AFTER_MS);
+
+    env.advance(HINT_LEVEL_2_AFTER_MS - HINT_LEVEL_1_AFTER_MS);
+    const emissions = room.hint(host.playerId, 2, room.getBoardVersion());
+    const message = privateMessages(emissions, 'hintRevealed')[0]!.message as HintRevealedMessage;
+    expect(message.level).toBe(2);
+    expect(message.cards).toHaveLength(2);
+    // Two cards fix the third exactly, and that card is on the board.
+    const [a, b] = message.cards as [CardId, CardId];
+    expect(isSetByIds(a, b, findRequiredThirdCardId(a, b))).toBe(true);
+    expect(room.getBoard()).toContain(findRequiredThirdCardId(a, b));
+  });
+
+  it('restarts the clock whenever the board changes', () => {
+    const { room, env, host, guest } = startedRoom();
+    env.advance(HINT_LEVEL_1_AFTER_MS);
+    expect(
+      privateMessages(room.hint(host.playerId, 1, room.getBoardVersion()), 'hintRevealed'),
+    ).toHaveLength(1);
+
+    room.claim(guest.playerId, setOnBoard(room), room.getBoardVersion());
+    const after = room.hint(host.playerId, 1, room.getBoardVersion());
+    expect((privateMessages(after, 'hintRejected')[0]!.message as HintRejectedMessage).reason).toBe(
+      'too_soon',
+    );
+    expect(room.snapshot().boardSince).toBe(env.now());
+  });
+
+  it('says there is nothing to point at on a set-free board', () => {
+    const { room, env, host } = setFreeBoardRoom();
+    env.advance(HINT_LEVEL_1_AFTER_MS);
+    const emissions = room.hint(host.playerId, 1, room.getBoardVersion());
+    expect(
+      (privateMessages(emissions, 'hintRejected')[0]!.message as HintRejectedMessage).reason,
+    ).toBe('no_set');
+    expect(eventsOf(emissions)).toEqual([]);
+  });
+
+  it('is rejected against a stale board version', () => {
+    const { room, env, host } = startedRoom();
+    env.advance(HINT_LEVEL_2_AFTER_MS);
+    const emissions = room.hint(host.playerId, 1, room.getBoardVersion() - 1);
+    expect(
+      (privateMessages(emissions, 'hintRejected')[0]!.message as HintRejectedMessage).reason,
+    ).toBe('board_changed');
+  });
+
+  it('is rejected outside the playing phase, however long the wait', () => {
+    const env = testEnv();
+    const room = new GameRoom('ABC234', env);
+    const host = join(room, 'Maya');
+    env.advance(HINT_LEVEL_2_AFTER_MS * 10);
+    const emissions = room.hint(host.playerId, 1, 0);
+    expect(
+      (privateMessages(emissions, 'hintRejected')[0]!.message as HintRejectedMessage).reason,
+    ).toBe('not_playing');
+  });
+
+  it('is available to a player who is serving a cooldown', () => {
+    const { room, env, host } = startedRoom();
+    room.claim(host.playerId, nonSetOnBoard(room), room.getBoardVersion());
+    env.advance(HINT_LEVEL_1_AFTER_MS);
+    // The board did not change, so the clock kept running: a wrong claim costs a
+    // cooldown on the board, not the right to ask for help.
+    expect(
+      privateMessages(room.hint(host.playerId, 1, room.getBoardVersion()), 'hintRevealed'),
+    ).toHaveLength(1);
   });
 });
