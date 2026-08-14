@@ -1,7 +1,9 @@
 name: Deploy frontend to GitHub Pages
 
-# Publishes on a push to the default branch — whatever it is called — so this
-# works before a `main` branch exists, and keeps working after one is created.
+# Publishes on a push to `main`. The `github-pages` environment only accepts
+# deployments from `main`, so naming the branch here means the guard and the
+# environment agree: a branch that cannot deploy no longer starts a build that
+# is destined to fail at the last step.
 on:
   push:
   workflow_dispatch:
@@ -20,13 +22,10 @@ concurrency:
 jobs:
   build:
     name: Build
-    # Deploys from the default branch, or from `main` when that is not the
-    # default (yet). Without the second clause a push to a `main` that is not the
-    # default branch would silently skip, which looks like nothing happened.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.ref_name == github.event.repository.default_branch ||
-      github.ref_name == 'main'
+    # Only ever builds from `main`, by name — see the note in `deploy-worker.yml`
+    # for why this no longer follows the repository's default branch.
+    # `workflow_dispatch` is held to the same rule.
+    if: github.ref_name == 'main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

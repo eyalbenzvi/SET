@@ -190,9 +190,9 @@ from a browser. It needs, under **Settings → Secrets and variables → Actions
   API Tokens → Create Token → "Edit Cloudflare Workers" template**
 - variable `CLOUDFLARE_ACCOUNT_ID` — the id in the dashboard URL after you log in
 
-It then runs on every push to the default branch, and can be started by hand from
-the **Actions** tab. If a run failed because the credentials were not set yet, add
-them and press **Re-run all jobs** on that run — no push needed.
+It then runs on every push to `main`, and can be started by hand from the
+**Actions** tab with `main` selected. If a run failed because the credentials were
+not set yet, add them and press **Re-run all jobs** on that run — no push needed.
 
 ## Deploy the frontend (GitHub Pages)
 
@@ -203,17 +203,19 @@ them and press **Re-run all jobs** on that run — no push needed.
    variables → Actions → Variables → New repository variable**, named
    `SET_API_BASE`, value `https://set-game-worker.<your-subdomain>.workers.dev`.
 
-3. Push to the default branch, or start **Deploy frontend to GitHub Pages** from
-   the **Actions** tab. It builds with the correct base path (taken from
+3. Push to `main`, or start **Deploy frontend to GitHub Pages** from the
+   **Actions** tab with `main` selected. It builds with the correct base path (taken from
    `actions/configure-pages`, so a project site at `/<repo>/` and a user site at
    `/` both work) and publishes `frontend/dist`.
 
 If `SET_API_BASE` is missing, the workflow fails with a message saying so instead
 of shipping a broken build. Set it and press **Re-run all jobs** on the failed run.
 
-Both deploy workflows key off the repository's _default branch_ rather than a
-branch literally named `main`, so they work before a `main` branch exists and
-keep working if you rename the trunk later.
+Both deploy workflows deploy only from a branch named `main`, and nothing else
+reaches production. They deliberately do not follow the repository's _default
+branch_ setting: that made whichever branch happened to be the default able to
+ship straight to production, so `main` is named outright instead. If you rename
+the trunk, update the `if:` guard in both workflows to match.
 
 To deploy by hand instead:
 
