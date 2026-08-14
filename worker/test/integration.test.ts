@@ -18,15 +18,7 @@ import {
   type ClaimRejectedMessage,
   type PublicState,
 } from '@set/shared';
-import {
-  BASE_URL,
-  TestClient,
-  WS_URL,
-  createRoom,
-  openRoom,
-  roomInfo,
-  sleep,
-} from './harness.js';
+import { BASE_URL, TestClient, WS_URL, createRoom, openRoom, roomInfo, sleep } from './harness.js';
 
 const openClients: TestClient[] = [];
 
@@ -70,7 +62,9 @@ async function playing(): Promise<{ code: string; host: TestClient; guest: TestC
   const [host, guest] = clients as [TestClient, TestClient];
   host.send({ t: 'start' });
   for (const client of [host, guest]) {
-    await client.waitForState((s) => s.phase === 'playing' && s.board.length === INITIAL_BOARD_SIZE);
+    await client.waitForState(
+      (s) => s.phase === 'playing' && s.board.length === INITIAL_BOARD_SIZE,
+    );
   }
   return { code, host, guest };
 }
@@ -179,7 +173,12 @@ describe('joining a room', () => {
     const [host] = clients as [TestClient];
     const state = host.state();
     expect(state.players).toHaveLength(1);
-    expect(state.players[0]).toMatchObject({ name: 'Maya', isHost: true, score: 0, connected: true });
+    expect(state.players[0]).toMatchObject({
+      name: 'Maya',
+      isHost: true,
+      score: 0,
+      connected: true,
+    });
     expect(host.token).toMatch(/^[0-9a-f]{32}$/);
     expect(host.playerId).not.toBe(host.token);
   });

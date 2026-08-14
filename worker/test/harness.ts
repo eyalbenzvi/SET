@@ -160,7 +160,9 @@ export class TestClient {
   }
 
   eventKinds(): string[] {
-    return this.received.filter((m) => m.t === 'event').map((m) => (m.t === 'event' ? m.event.k : ''));
+    return this.received
+      .filter((m) => m.t === 'event')
+      .map((m) => (m.t === 'event' ? m.event.k : ''));
   }
 
   clear(): void {

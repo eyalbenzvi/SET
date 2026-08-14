@@ -177,7 +177,11 @@ export class GameRoomDO implements DurableObject {
     }
   }
 
-  private async dispatch(socket: WebSocket, meta: SocketMeta, message: ClientMessage): Promise<void> {
+  private async dispatch(
+    socket: WebSocket,
+    meta: SocketMeta,
+    message: ClientMessage,
+  ): Promise<void> {
     const room = this.room;
     if (!room) {
       this.sendError(socket, 'room_closed', true);

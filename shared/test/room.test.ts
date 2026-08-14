@@ -19,7 +19,9 @@ import { GameRoom, checkRoomInvariants, type Emission, type RoomEnv } from '../s
 import { seededRandom } from '../src/shuffle.js';
 
 /** Controllable clock + deterministic ids and shuffle, so failures reproduce exactly. */
-function testEnv(seed = 1234): RoomEnv & { advance: (ms: number) => void; setNow: (t: number) => void } {
+function testEnv(
+  seed = 1234,
+): RoomEnv & { advance: (ms: number) => void; setNow: (t: number) => void } {
   let clock = 1_700_000_000_000;
   let counter = 0;
   const random = seededRandom(seed);
@@ -58,8 +60,8 @@ function firstEvent<K extends GameEventKind>(
 function privateMessages<T extends ServerMessage['t']>(
   emissions: Emission[],
   type: T,
-): Array<{ playerId: string; message: Extract<ServerMessage, { t: T }> }> {
-  const out: Array<{ playerId: string; message: Extract<ServerMessage, { t: T }> }> = [];
+): { playerId: string; message: Extract<ServerMessage, { t: T }> }[] {
+  const out: { playerId: string; message: Extract<ServerMessage, { t: T }> }[] = [];
   for (const emission of emissions) {
     if (emission.message.t === type && emission.target.kind === 'player') {
       out.push({
@@ -203,7 +205,11 @@ describe('room creation and joining', () => {
 
   it('rejects a resume attempt with the wrong token', () => {
     const seat = join(room, 'Maya');
-    const attempt = room.join({ name: 'Impostor', playerId: seat.playerId, token: 'wrongtoken1234' });
+    const attempt = room.join({
+      name: 'Impostor',
+      playerId: seat.playerId,
+      token: 'wrongtoken1234',
+    });
     expect(attempt.ok).toBe(false);
     if (attempt.ok) return;
     expect(attempt.code).toBe('not_authorized');
@@ -453,7 +459,8 @@ describe('invalid SET claims', () => {
     const { room, host } = startedRoom();
     const cards = nonSetOnBoard(room);
     const emissions = room.claim(host.playerId, cards, room.getBoardVersion());
-    const rejection = privateMessages(emissions, 'claimRejected')[0]!.message as ClaimRejectedMessage;
+    const rejection = privateMessages(emissions, 'claimRejected')[0]!
+      .message as ClaimRejectedMessage;
     const mismatch = rejection.mismatch!;
     const values = cards.map((id) => cardById(id)[mismatch.attribute]);
     expect(new Set(values).size).toBe(2);
@@ -472,8 +479,10 @@ describe('invalid SET claims', () => {
     env.advance(INVALID_ACTION_COOLDOWN_MS - 1);
     expect(
       (
-        privateMessages(room.claim(host.playerId, setOnBoard(room), room.getBoardVersion()), 'claimRejected')[0]!
-          .message as ClaimRejectedMessage
+        privateMessages(
+          room.claim(host.playerId, setOnBoard(room), room.getBoardVersion()),
+          'claimRejected',
+        )[0]!.message as ClaimRejectedMessage
       ).reason,
     ).toBe('cooldown');
 
@@ -541,7 +550,8 @@ describe('stale and simultaneous claims', () => {
     const { room, host } = startedRoom();
     const board = room.getBoard();
     const offBoard: CardId[] = [];
-    for (let id = 0; id < 81 && offBoard.length < 3; id++) if (!board.includes(id)) offBoard.push(id);
+    for (let id = 0; id < 81 && offBoard.length < 3; id++)
+      if (!board.includes(id)) offBoard.push(id);
     const emissions = room.claim(host.playerId, offBoard, room.getBoardVersion());
     expect(
       (privateMessages(emissions, 'claimRejected')[0]!.message as ClaimRejectedMessage).reason,
@@ -559,7 +569,12 @@ describe('stale and simultaneous claims', () => {
 });
 
 /** A room whose initial 12-card deal happens to contain no set. */
-function setFreeBoardRoom(): { room: GameRoom; env: ReturnType<typeof testEnv>; host: Seat; guest: Seat } {
+function setFreeBoardRoom(): {
+  room: GameRoom;
+  env: ReturnType<typeof testEnv>;
+  host: Seat;
+  guest: Seat;
+} {
   for (let seed = 1; seed < 5000; seed++) {
     const candidate = startedRoom(seed);
     if (!hasSet(candidate.room.getBoard())) return candidate;
@@ -575,7 +590,8 @@ describe('"No SET on board"', () => {
 
     const emissions = room.noSet(host.playerId, room.getBoardVersion());
     expect(room.getBoard()).toEqual(before);
-    const rejection = privateMessages(emissions, 'noSetRejected')[0]!.message as NoSetRejectedMessage;
+    const rejection = privateMessages(emissions, 'noSetRejected')[0]!
+      .message as NoSetRejectedMessage;
     expect(rejection.reason).toBe('set_exists');
     expect(rejection.cooldownUntil).toBe(env.now() + INVALID_ACTION_COOLDOWN_MS);
     // No card ids leak in any message produced by the rejection.
@@ -605,7 +621,8 @@ describe('"No SET on board"', () => {
     const { room, host } = startedRoom();
     const stale = room.getBoardVersion() - 1;
     const emissions = room.noSet(host.playerId, stale);
-    const rejection = privateMessages(emissions, 'noSetRejected')[0]!.message as NoSetRejectedMessage;
+    const rejection = privateMessages(emissions, 'noSetRejected')[0]!
+      .message as NoSetRejectedMessage;
     expect(rejection.reason).toBe('board_changed');
     expect(rejection.cooldownUntil).toBe(0);
   });
@@ -905,7 +922,11 @@ describe('persistence', () => {
   it('still rejects a wrong token after a restart', () => {
     const { room, env, host } = startedRoom();
     const restored = GameRoom.deserialize(JSON.parse(JSON.stringify(room.serialize())), env);
-    const attempt = restored.join({ name: 'Impostor', playerId: host.playerId, token: 'nope1234abcd' });
+    const attempt = restored.join({
+      name: 'Impostor',
+      playerId: host.playerId,
+      token: 'nope1234abcd',
+    });
     expect(attempt.ok).toBe(false);
   });
 });

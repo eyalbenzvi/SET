@@ -185,7 +185,7 @@ describe('isSet', () => {
         [b, c, a],
         [c, a, b],
         [c, b, a],
-      ] as Array<[Card, Card, Card]>) {
+      ] as [Card, Card, Card][]) {
         expect(isSet(...perm)).toBe(true);
       }
     }
@@ -198,8 +198,12 @@ describe('requiredThirdValue / findRequiredThirdCard', () => {
       for (const b of ALL_VALUES) {
         const c = requiredThirdValue(a, b);
         expect(ALL_VALUES).toContain(c);
-        if (a === b) expect(c).toBe(a);
-        else expect(c).not.toBe(a), expect(c).not.toBe(b);
+        if (a === b) {
+          expect(c).toBe(a);
+        } else {
+          expect(c).not.toBe(a);
+          expect(c).not.toBe(b);
+        }
         expect(isValidTriple(a, b, c)).toBe(true);
       }
     }
@@ -295,11 +299,17 @@ describe('findAllSets', () => {
 
 describe('describeMismatch', () => {
   it('returns null for a valid set', () => {
-    expect(describeMismatch(makeCard(0, 0, 0, 0), makeCard(1, 0, 0, 0), makeCard(2, 0, 0, 0))).toBeNull();
+    expect(
+      describeMismatch(makeCard(0, 0, 0, 0), makeCard(1, 0, 0, 0), makeCard(2, 0, 0, 0)),
+    ).toBeNull();
   });
 
   it('names the repeated and odd values', () => {
-    const mismatch = describeMismatch(makeCard(0, 0, 2, 0), makeCard(1, 0, 2, 0), makeCard(2, 0, 1, 0));
+    const mismatch = describeMismatch(
+      makeCard(0, 0, 2, 0),
+      makeCard(1, 0, 2, 0),
+      makeCard(2, 0, 1, 0),
+    );
     expect(mismatch).toEqual({ attribute: 'color', repeatedValue: 'purple', oddValue: 'green' });
   });
 

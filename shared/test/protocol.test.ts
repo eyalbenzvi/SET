@@ -140,18 +140,33 @@ describe('parseClientMessage', () => {
 
   it('accepts a well-formed claim', () => {
     const result = parseClientMessage(encode({ t: 'claim', cards: [0, 40, 80], boardVersion: 3 }));
-    expect(result).toEqual({ ok: true, value: { t: 'claim', cards: [0, 40, 80], boardVersion: 3 } });
+    expect(result).toEqual({
+      ok: true,
+      value: { t: 'claim', cards: [0, 40, 80], boardVersion: 3 },
+    });
   });
 
   it('rejects claims with the wrong shape, bad ids, duplicates or a bad version', () => {
     expect(expectRejected(encode({ t: 'claim', cards: [0, 1], boardVersion: 1 }))).toContain('3');
-    expect(expectRejected(encode({ t: 'claim', cards: [0, 1, 2, 3], boardVersion: 1 }))).toContain('3');
+    expect(expectRejected(encode({ t: 'claim', cards: [0, 1, 2, 3], boardVersion: 1 }))).toContain(
+      '3',
+    );
     expect(expectRejected(encode({ t: 'claim', cards: 'abc', boardVersion: 1 }))).toContain('3');
-    expect(expectRejected(encode({ t: 'claim', cards: [0, 1, 81], boardVersion: 1 }))).toContain('card ids');
-    expect(expectRejected(encode({ t: 'claim', cards: [0, 1, -1], boardVersion: 1 }))).toContain('card ids');
-    expect(expectRejected(encode({ t: 'claim', cards: [0, 1, 1.5], boardVersion: 1 }))).toContain('card ids');
-    expect(expectRejected(encode({ t: 'claim', cards: [0, 1, '2'], boardVersion: 1 }))).toContain('card ids');
-    expect(expectRejected(encode({ t: 'claim', cards: [5, 5, 5], boardVersion: 1 }))).toContain('distinct');
+    expect(expectRejected(encode({ t: 'claim', cards: [0, 1, 81], boardVersion: 1 }))).toContain(
+      'card ids',
+    );
+    expect(expectRejected(encode({ t: 'claim', cards: [0, 1, -1], boardVersion: 1 }))).toContain(
+      'card ids',
+    );
+    expect(expectRejected(encode({ t: 'claim', cards: [0, 1, 1.5], boardVersion: 1 }))).toContain(
+      'card ids',
+    );
+    expect(expectRejected(encode({ t: 'claim', cards: [0, 1, '2'], boardVersion: 1 }))).toContain(
+      'card ids',
+    );
+    expect(expectRejected(encode({ t: 'claim', cards: [5, 5, 5], boardVersion: 1 }))).toContain(
+      'distinct',
+    );
     expect(expectRejected(encode({ t: 'claim', cards: [0, 1, 2] }))).toContain('boardVersion');
     expect(expectRejected(encode({ t: 'claim', cards: [0, 1, 2], boardVersion: -1 }))).toContain(
       'boardVersion',

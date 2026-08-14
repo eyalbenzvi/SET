@@ -268,7 +268,7 @@ export class GameRoom {
         // Renaming is only allowed while nobody has started playing.
         if (this.phase === 'lobby') existing.name = this.uniqueName(request.name, existing.id);
         this.emptySince = null;
-        if (this.hostId === null) this.hostId = existing.id;
+        this.hostId ??= existing.id;
 
         const emissions: Emission[] = [];
         if (reconnecting) {
@@ -317,7 +317,7 @@ export class GameRoom {
     player.name = this.uniqueName(request.name, player.id);
     this.players.push(player);
     this.emptySince = null;
-    if (this.hostId === null) this.hostId = player.id;
+    this.hostId ??= player.id;
 
     return {
       ok: true,
@@ -325,7 +325,9 @@ export class GameRoom {
       token: player.token,
       replacedConnection: false,
       emissions: [
-        toAll(this.eventMessage({ k: 'playerJoined', playerId: player.id, playerName: player.name })),
+        toAll(
+          this.eventMessage({ k: 'playerJoined', playerId: player.id, playerName: player.name }),
+        ),
       ],
     };
   }
@@ -333,12 +335,16 @@ export class GameRoom {
   /** Mark a player's socket as dropped, starting their reconnect grace period. */
   disconnect(playerId: string): Emission[] {
     const player = this.findPlayer(playerId);
-    if (!player || !player.connected) return [];
+    if (!player?.connected) return [];
     player.connected = false;
     player.disconnectedAt = this.env.now();
     const emissions: Emission[] = [
       toAll(
-        this.eventMessage({ k: 'playerDisconnected', playerId: player.id, playerName: player.name }),
+        this.eventMessage({
+          k: 'playerDisconnected',
+          playerId: player.id,
+          playerName: player.name,
+        }),
       ),
     ];
     emissions.push(...this.reassignHostIfNeeded());

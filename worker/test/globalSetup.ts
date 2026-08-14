@@ -16,8 +16,8 @@ let child: ChildProcess | null = null;
 async function waitForHealth(): Promise<void> {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   for (;;) {
-    if (child?.exitCode !== null && child?.exitCode !== undefined) {
-      throw new Error(`wrangler dev exited early with code ${child.exitCode}`);
+    if (child != null && child.exitCode !== null) {
+      throw new Error(`wrangler dev exited early with code ${String(child.exitCode)}`);
     }
     try {
       const response = await fetch(`${BASE_URL}/health`);
@@ -51,7 +51,7 @@ export async function setup(): Promise<void> {
 }
 
 export async function teardown(): Promise<void> {
-  if (!child || child.exitCode !== null) return;
+  if (child?.exitCode !== null) return;
   child.kill('SIGTERM');
   await Promise.race([once(child, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
   if (child.exitCode === null) child.kill('SIGKILL');

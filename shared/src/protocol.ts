@@ -165,11 +165,7 @@ export type ErrorCode =
   | 'internal_error';
 
 export type ClaimRejectReason =
-  | 'not_a_set'
-  | 'board_changed'
-  | 'cooldown'
-  | 'not_playing'
-  | 'invalid_cards';
+  'not_a_set' | 'board_changed' | 'cooldown' | 'not_playing' | 'invalid_cards';
 
 export type NoSetRejectReason = 'set_exists' | 'cooldown' | 'not_playing' | 'board_changed';
 
@@ -255,6 +251,8 @@ export function normalizeName(input: unknown): string | null {
   if (typeof input !== 'string') return null;
   const cleaned = input
     // C0/C1 controls, plus bidi/format characters that can visually reorder text.
+    // Matching control characters is the whole point here, hence the exemption.
+    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -325,7 +323,7 @@ export function parseClientMessage(raw: unknown): ParseResult<ClientMessage> {
         return { ok: false, error: 'claim.cards must have exactly 3 entries' };
       }
       if (!cards.every(isCardId)) return { ok: false, error: 'claim.cards must be card ids' };
-      const ids = cards as CardId[];
+      const ids = cards;
       if (new Set(ids).size !== SET_SIZE) {
         return { ok: false, error: 'claim.cards must be distinct' };
       }

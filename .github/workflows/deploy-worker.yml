@@ -1,0 +1,47 @@
+name: Deploy Worker to Cloudflare
+
+# Manual only, on purpose: the backend is deployed far less often than the
+# frontend, and a Durable Object migration should be a deliberate act.
+#
+# Requires one repository secret:
+#   CLOUDFLARE_API_TOKEN — an API token with the "Edit Cloudflare Workers"
+#                          template permissions.
+# And one repository variable:
+#   CLOUDFLARE_ACCOUNT_ID — your Cloudflare account id.
+#
+# Deploying by hand with `npm run deploy --workspace worker` needs neither and is
+# the documented default (see README).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: wrangler deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check credentials are configured
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::Repository secret CLOUDFLARE_API_TOKEN is not set (see this workflow's comments)."
+            exit 1
+          fi
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm run deploy --workspace worker

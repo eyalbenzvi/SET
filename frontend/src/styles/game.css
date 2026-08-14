@@ -1,0 +1,463 @@
+/*
+ * Board screen.
+ *
+ * Three fixed regions: score strip, scrolling board, action bar. Only the board
+ * scrolls, so the claim button and the score strip are always reachable and can
+ * never be clipped on a short phone screen.
+ */
+
+.screen--game {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  /* Height comes from the pinned `.app` (see `body.is-playing` in base.css), so
+     the rows resolve against a definite height and the board row can shrink. */
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------- Header */
+
+.gameHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: calc(8px + var(--safe-top)) 10px 8px;
+  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+
+.scores {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.scores::-webkit-scrollbar {
+  display: none;
+}
+
+.scoreChip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  border: 1.5px solid transparent;
+  max-width: 42vw;
+}
+
+.scoreChip__name {
+  font-size: 0.8125rem;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scoreChip__score {
+  font-size: 0.9375rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.scoreChip--me {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.scoreChip--offline {
+  opacity: 0.5;
+}
+
+/* A dashed ring marks a player waiting out a cooldown — no colour dependency. */
+.scoreChip--cooling {
+  border-style: dashed;
+  border-color: var(--warn);
+}
+
+.meters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+}
+
+.meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.meter__label {
+  font-size: 0.875rem;
+}
+
+.meter__value {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.meters .btn--tiny {
+  margin-inline-start: auto;
+}
+
+/* ---------------------------------------------------------------- Board */
+
+.boardWrap {
+  position: relative;
+  min-height: 0;
+  /* The layout sizes cards to fit, so scrolling is a fallback, not the norm. */
+  overflow-y: hidden;
+  overflow-x: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  transition: background-color 200ms ease;
+}
+
+.boardWrap > .board {
+  align-self: center;
+}
+
+/* Only when the board genuinely cannot fit at a legible card size. */
+.boardWrap--scrolls {
+  overflow-y: auto;
+  align-items: flex-start;
+  -webkit-overflow-scrolling: touch;
+}
+
+.boardWrap--accepted {
+  animation: board-pulse 600ms ease-out;
+}
+
+.boardWrap--mine {
+  animation: board-pulse-mine 600ms ease-out;
+}
+
+@keyframes board-pulse {
+  0% {
+    background: color-mix(in srgb, var(--good) 14%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+@keyframes board-pulse-mine {
+  0% {
+    background: color-mix(in srgb, var(--good) 26%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/*
+ * Flex wrapping with an explicit board width: the width is computed so that the
+ * line breaks fall exactly at the intended column count, and a short final row
+ * centres itself instead of hanging off to one side.
+ */
+.board {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: start;
+  gap: var(--gap);
+  width: var(--board-w, 100%);
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.board--nudge {
+  animation: nudge 340ms ease-in-out;
+}
+
+@keyframes nudge {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  75% {
+    transform: translateX(5px);
+  }
+}
+
+.board__ghosts {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* ---------------------------------------------------------------- Card */
+
+.card {
+  appearance: none;
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  width: var(--card-w, 100px);
+  aspect-ratio: var(--card-aspect);
+  padding: 0;
+  border: 2.5px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    transform 130ms ease,
+    border-color 130ms ease,
+    box-shadow 160ms ease;
+}
+
+.card:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.card__inner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+}
+
+.card__art {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+}
+
+/* Selection is signalled four ways at once: border, lift, badge and
+   `aria-pressed`. None of them is colour-only. */
+.card--selected {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px var(--accent-soft),
+    var(--shadow-lift);
+  transform: translateY(-3px);
+}
+
+.card--selected .card__badge {
+  display: grid;
+}
+
+.card__badge {
+  display: none;
+  place-items: center;
+  position: absolute;
+  top: -9px;
+  inset-inline-start: -9px;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.8125rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: var(--shadow-sm);
+}
+
+.card__assist {
+  position: absolute;
+  top: 3px;
+  inset-inline-end: 5px;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
+}
+
+.card--static {
+  cursor: default;
+  opacity: 1;
+}
+
+.card--enter {
+  animation: card-enter 260ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+@keyframes card-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.82) rotate(-2deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.card--exit {
+  position: absolute;
+  margin: 0;
+  animation: card-exit 380ms ease-in forwards;
+}
+
+@keyframes card-exit {
+  0% {
+    opacity: 1;
+    transform: none;
+  }
+  30% {
+    transform: scale(1.06);
+    border-color: var(--good);
+    box-shadow: 0 0 0 4px var(--good-soft);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.6) translateY(-22px);
+  }
+}
+
+.card--accepted {
+  animation: card-accepted 420ms ease-out;
+}
+
+@keyframes card-accepted {
+  0%,
+  100% {
+    border-color: var(--line);
+  }
+  40% {
+    border-color: var(--good);
+    box-shadow: 0 0 0 4px var(--good-soft);
+  }
+}
+
+.card--rejected {
+  animation: card-rejected 380ms ease-in-out;
+}
+
+@keyframes card-rejected {
+  0%,
+  100% {
+    transform: translateX(0);
+    border-color: var(--accent);
+  }
+  20% {
+    transform: translateX(-6px);
+    border-color: var(--bad);
+  }
+  60% {
+    transform: translateX(6px);
+    border-color: var(--bad);
+  }
+}
+
+/* ---------------------------------------------------------------- Feed */
+
+.feed {
+  min-height: 1.125rem;
+  font-size: 0.78125rem;
+  font-weight: 650;
+  text-align: center;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feed[data-tone='good'] {
+  color: var(--good);
+}
+
+.feed[data-tone='bad'] {
+  color: var(--bad);
+}
+
+.feed--in {
+  animation: feed-in 240ms ease-out;
+}
+
+@keyframes feed-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------------------------------------------------------------- Actions */
+
+.actionBar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px calc(10px + var(--safe-bottom));
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--line);
+}
+
+.feedback {
+  min-height: 1.25rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-align: center;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+.feedback[data-tone='bad'] {
+  color: var(--bad);
+}
+
+.feedback[data-tone='good'] {
+  color: var(--good);
+}
+
+.feedback[data-tone='info'] {
+  color: var(--ink-muted);
+}
+
+.actionBar__buttons {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 8px;
+}
+
+.btn--claim {
+  min-height: 54px;
+  font-size: 1.0625rem;
+}
+
+.btn--noset {
+  min-height: 54px;
+  font-size: 0.9375rem;
+}
+
+/* Wider screens: cards stay comfortable and the action bar centres. */
+@media (min-width: 700px) {
+  :root {
+    --gap: 12px;
+    --page-pad: 20px;
+  }
+
+  .gameHeader,
+  .actionBar {
+    padding-inline: 20px;
+  }
+
+  .actionBar__buttons {
+    max-width: 560px;
+    margin: 0 auto;
+    width: 100%;
+  }
+}
