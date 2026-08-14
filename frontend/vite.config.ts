@@ -21,6 +21,9 @@ export default defineConfig(({ mode }) => {
       chunkSizeWarningLimit: 300,
     },
     server: { port: 5173, strictPort: true },
-    preview: { port: 4173, strictPort: true },
+    // Bound to the loopback address explicitly: on CI runners `localhost` can
+    // resolve to ::1 first, so a server on `localhost` is unreachable at
+    // 127.0.0.1 and the end-to-end runner times out waiting for it.
+    preview: { port: 4173, strictPort: true, host: '127.0.0.1' },
   };
 });

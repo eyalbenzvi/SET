@@ -73,8 +73,9 @@ npm run dev
 ```
 
 Open <http://localhost:5173>, create a game, then open the same URL in a second
-browser window (or on your phone, using your machine's LAN address) and join with
-the code. The dev frontend defaults to `http://127.0.0.1:8787` for the backend,
+browser window and join with the code. To play from a phone on the same network,
+start the frontend with `npm run dev -- --host` and use the LAN address it
+prints. The dev frontend defaults to `http://127.0.0.1:8787` for the backend,
 and the Worker always allows `localhost` origins, so neither side needs
 configuration.
 
