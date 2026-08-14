@@ -1,13 +1,11 @@
 name: Deploy Worker to Cloudflare
 
-# Runs on a push to the repository's default branch, and can also be started by
-# hand from the Actions tab.
+# Runs on a push to `main`, and can also be started by hand from the Actions tab.
 #
 # Why a push trigger at all, when deploys should be deliberate? GitHub only lists
 # a workflow in the Actions tab once it has a non-manual trigger or a past run —
-# a manual-only workflow on a repository without a `main` branch is invisible,
-# with no button to press. The job guard below keeps the behaviour deliberate:
-# nothing deploys except from the default branch, whatever that branch is called.
+# a manual-only workflow is invisible, with no button to press. The job guard
+# below keeps the behaviour deliberate: nothing deploys except from `main`.
 #
 # Requires one repository secret:
 #   CLOUDFLARE_API_TOKEN — an API token with the "Edit Cloudflare Workers"
@@ -27,16 +25,19 @@ permissions:
 jobs:
   deploy:
     name: wrangler deploy
-    # Only ever deploys from the default branch. Comparing against
-    # `default_branch` rather than a hard-coded name means renaming the trunk (to
-    # `main`, say) needs no change here.
-    # Deploys from the default branch, or from `main` when that is not the
-    # default (yet). Without the second clause a push to a `main` that is not the
-    # default branch would silently skip, which looks like nothing happened.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.ref_name == github.event.repository.default_branch ||
-      github.ref_name == 'main'
+    # Only ever deploys from `main`, by name.
+    #
+    # This deliberately does not consult `github.event.repository.default_branch`.
+    # That earlier guard meant whichever branch happened to be the repository
+    # default could ship straight to production, and a feature branch that was
+    # briefly the default did exactly that — deploying an unreviewed commit while
+    # the Pages half of the same release was blocked. Naming the branch keeps
+    # production tied to the branch that PRs are reviewed and merged into,
+    # whatever the repository setting says.
+    #
+    # `workflow_dispatch` is held to the same rule, so a manual run has to be
+    # started from `main` as well.
+    if: github.ref_name == 'main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
