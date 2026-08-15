@@ -480,11 +480,14 @@ export class GameRoom {
     if (playerId !== this.hostId) return { ok: false, code: 'not_host' };
     if (this.connectedCount() < MIN_PLAYERS) return { ok: false, code: 'not_enough_players' };
     this.beginGame();
+    // Roughly one opening deal in thirty has no set in it, and that is resolved
+    // here exactly as it is mid-game. Evaluated *before* `gameStarted` is built,
+    // so the very first snapshot a client sees already carries the pending deal
+    // rather than showing a playable board for one message.
+    const announcement = this.evaluateBoard();
     return {
       ok: true,
-      // Roughly one opening deal in thirty has no set in it, and that is resolved
-      // here exactly as it is mid-game.
-      emissions: [toAll(this.eventMessage({ k: 'gameStarted' })), ...this.evaluateBoard()],
+      emissions: [toAll(this.eventMessage({ k: 'gameStarted' })), ...announcement],
     };
   }
 
@@ -523,7 +526,8 @@ export class GameRoom {
     );
     emissions.push(...this.reassignHostIfNeeded());
     this.beginGame();
-    emissions.push(toAll(this.eventMessage({ k: 'gameStarted' })), ...this.evaluateBoard());
+    const announcement = this.evaluateBoard();
+    emissions.push(toAll(this.eventMessage({ k: 'gameStarted' })), ...announcement);
     return { ok: true, emissions };
   }
 

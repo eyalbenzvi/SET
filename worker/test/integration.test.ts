@@ -419,22 +419,29 @@ describe('gameplay over the wire', () => {
   });
 
   it('announces a set-free board to everyone and deals three cards on its own', async () => {
-    const { host, guest } = await playingWhere((board) => !hasSet(board));
-    const state = host.state();
-    // Nobody sent anything: the announcement rode out of `start` itself.
+    const { guest } = await playingWhere((board) => !hasSet(board));
+    // Nobody sent anything: the announcement rode out of `start` itself. Read
+    // through the message that carries it rather than off the latest state,
+    // which the deal it schedules would overtake.
+    const announcement = await guest.waitFor(
+      (m) => m.t === 'event' && m.event.k === 'noSetOnBoard',
+    );
+    if (announcement.t !== 'event' || announcement.event.k !== 'noSetOnBoard') {
+      throw new Error('unreachable');
+    }
+    const state = announcement.state;
+    expect(state.board).toHaveLength(INITIAL_BOARD_SIZE);
     expect(state.autoDealAt).toBeGreaterThan(state.serverTime);
-
-    const announced = await guest.waitForEvent('noSetOnBoard');
-    expect(announced.dealsAt).toBeGreaterThan(0);
+    expect(announcement.event.dealsAt).toBe(state.autoDealAt);
 
     const event = await guest.waitForEvent('cardsAdded');
     expect(event).toMatchObject({ count: 3, reason: 'auto' });
-    const updated = await guest.waitForState((s) => s.board.length === 15);
+    const updated = await guest.waitForState((s) => s.boardVersion > state.boardVersion);
     // The existing twelve keep their slots, so nothing moves under the players.
+    expect(updated.board).toHaveLength(15);
     expect(updated.board.slice(0, 12)).toEqual(state.board);
     expect(updated.deckRemaining).toBe(state.deckRemaining - 3);
     expect(updated.players.every((p) => p.cooldownUntil === 0)).toBe(true);
-    expect(updated.autoDealAt).toBe(0);
   }, 180_000);
 
   it('refuses a claim made on a board it has already called dead, at no cost', async () => {
@@ -446,13 +453,14 @@ describe('gameplay over the wire', () => {
     expect(rejection.reason).toBe('no_set_on_board');
     expect(rejection.cooldownUntil).toBe(0);
     // ...and the cards still arrive, for everybody, right after.
-    const updated = await guest.waitForState((s) => s.board.length === 15);
+    const updated = await guest.waitForState((s) => s.boardVersion > state.boardVersion);
     expect(updated.players.every((p) => p.cooldownUntil === 0)).toBe(true);
   }, 180_000);
 
   it('does not replace claimed cards while the board is larger than twelve', async () => {
     const { host, guest } = await playingWhere((board) => !hasSet(board));
-    const grown = await host.waitForState((s) => s.board.length === 15);
+    const opening = host.state().boardVersion;
+    const grown = await host.waitForState((s) => s.boardVersion > opening && s.board.length === 15);
     expect(hasSet(grown.board)).toBe(true);
 
     const cards = setOn(grown);
