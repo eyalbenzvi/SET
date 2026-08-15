@@ -257,9 +257,6 @@ export class GameRoomDO implements DurableObject {
       case 'claim':
         await this.deliver(room.claim(playerId, message.cards, message.boardVersion));
         return;
-      case 'noSet':
-        await this.deliver(room.noSet(playerId, message.boardVersion));
-        return;
       case 'deal':
         await this.deliver(room.voteDeal(playerId, message.want, message.boardVersion));
         return;
@@ -383,8 +380,9 @@ export class GameRoomDO implements DurableObject {
   }
 
   /**
-   * Fires for reconnect-grace expiry and idle-room cleanup. Reclaiming a seat is
-   * a normal state transition, so it broadcasts like any other event.
+   * Fires for reconnect-grace expiry, the automatic deal onto a set-less board,
+   * and idle-room cleanup. Each is a normal state transition, so it broadcasts
+   * like any other event.
    */
   async alarm(): Promise<void> {
     const room = this.room;

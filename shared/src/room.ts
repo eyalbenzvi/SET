@@ -12,10 +12,11 @@
  *  - Clients never learn deck order, other players' tokens, or where the sets are.
  *  - A claim only mutates the board it was made against (`boardVersion`).
  *  - Cooldowns are per-player and are only applied to a player's *own* mistakes.
- *  - The game can never sit on a set-less board while the deck still has cards
- *    and no way forward: "No SET on board" always resolves that position.
- *  - Extra cards are only dealt on the table's unanimous request, or when a
- *    correct "No SET on board" call forces it.
+ *  - The game can never sit on a set-less board: the server checks after every
+ *    board change, announces the dead position at once, and either deals three
+ *    more cards a beat later or ends the game.
+ *  - Extra cards are only dealt on the table's unanimous request, or by that
+ *    automatic resolution of a set-less board.
  *  - Hints unlock on time spent on the *current* board, so they cannot be farmed
  *    by waiting once and then claiming repeatedly.
  */
@@ -28,6 +29,7 @@ import {
   MAX_BOARD_SIZE,
   MAX_PLAYERS,
   MIN_PLAYERS,
+  NO_SET_PAUSE_MS,
   PROTOCOL_VERSION,
   RECONNECT_GRACE_MS,
   ROOM_IDLE_TTL_MS,
@@ -38,7 +40,6 @@ import {
   type GamePhase,
   type HintLevel,
   type HintRejectReason,
-  type NoSetRejectReason,
   type PublicPlayer,
   type PublicState,
   type ServerMessage,
@@ -118,7 +119,7 @@ export type JoinOutcome =
 
 export interface SerializedRoom {
   /** Storage schema version, for forward-compatible migrations. */
-  s: 2;
+  s: 3;
   code: string;
   phase: GamePhase;
   players: PlayerRecord[];
@@ -131,16 +132,21 @@ export interface SerializedRoom {
   dealVotes: string[];
   dealVoteExpiresAt: number;
   boardSince: number;
+  autoDealAt: number;
 }
 
 /**
  * Anything the Durable Object's storage may hold. Version 1 predates the shared
- * "deal more cards" vote and the hint clock, so those fields are absent; they
- * are restored with safe defaults rather than failing to load a live room.
+ * "deal more cards" vote and the hint clock and version 2 predates the automatic
+ * resolution of a set-less board, so those fields are absent; they are restored
+ * with safe defaults rather than failing to load a live room.
  */
 export type StoredRoom =
   | SerializedRoom
-  | (Omit<SerializedRoom, 's' | 'dealVotes' | 'dealVoteExpiresAt' | 'boardSince'> & { s: 1 });
+  | (Omit<SerializedRoom, 's' | 'autoDealAt'> & { s: 2 })
+  | (Omit<SerializedRoom, 's' | 'dealVotes' | 'dealVoteExpiresAt' | 'boardSince' | 'autoDealAt'> & {
+      s: 1;
+    });
 
 /** Player-visible copy for messages that must not leak the token. */
 function publicPlayer(player: PlayerRecord, hostId: string | null): PublicPlayer {
@@ -175,6 +181,8 @@ export class GameRoom {
   private dealVoteExpiresAt = 0;
   /** When the current board came into being — the clock the hints count from. */
   private boardSince = 0;
+  /** When three cards land on a board that has no set; 0 while a set is findable. */
+  private autoDealAt = 0;
 
   constructor(code: string, env: RoomEnv = defaultRoomEnv()) {
     this.code = code;
@@ -205,6 +213,11 @@ export class GameRoom {
 
   getDeckRemaining(): number {
     return this.deck.length;
+  }
+
+  /** When the automatic deal onto a set-less board is due; 0 when none is pending. */
+  getAutoDealAt(): number {
+    return this.autoDealAt;
   }
 
   playerCount(): number {
@@ -244,6 +257,7 @@ export class GameRoom {
       dealVotes: this.dealVotes.slice(),
       dealVoteExpiresAt: this.dealVoteExpiresAt,
       boardSince: this.boardSince,
+      autoDealAt: this.autoDealAt,
     };
   }
 
@@ -263,8 +277,8 @@ export class GameRoom {
 
   /**
    * The next moment at which `tick()` has work to do (reconnect grace expiry, a
-   * lapsing request for more cards, or idle-room cleanup), or `null` when no
-   * timer is needed.
+   * lapsing request for more cards, the automatic deal onto a set-less board, or
+   * idle-room cleanup), or `null` when no timer is needed.
    */
   nextTimerAt(): number | null {
     let earliest: number | null = null;
@@ -276,6 +290,7 @@ export class GameRoom {
     }
     if (this.emptySince !== null) consider(this.emptySince + ROOM_IDLE_TTL_MS);
     if (this.dealVoteExpiresAt > 0) consider(this.dealVoteExpiresAt);
+    if (this.autoDealAt > 0) consider(this.autoDealAt);
     return earliest;
   }
 
@@ -413,8 +428,9 @@ export class GameRoom {
   }
 
   /**
-   * Advance time-based state: reclaim seats whose grace period has elapsed, and
-   * drop a request for more cards that the table never answered.
+   * Advance time-based state: reclaim seats whose grace period has elapsed, drop
+   * a request for more cards that the table never answered, and put three cards
+   * onto a board that was announced as having no set.
    * Called from the Durable Object alarm; safe to call at any time.
    */
   tick(): Emission[] {
@@ -445,6 +461,12 @@ export class GameRoom {
       // Losing a player can complete a request the rest of the table already made.
       emissions.push(...this.settleDealVotes());
     }
+
+    // Last, because anything above may already have moved the board on — in which
+    // case the pending deal was recomputed for the board that replaced it.
+    if (this.autoDealAt > 0 && now >= this.autoDealAt) {
+      emissions.push(...this.resolveSetlessBoard());
+    }
     return emissions;
   }
 
@@ -458,7 +480,12 @@ export class GameRoom {
     if (playerId !== this.hostId) return { ok: false, code: 'not_host' };
     if (this.connectedCount() < MIN_PLAYERS) return { ok: false, code: 'not_enough_players' };
     this.beginGame();
-    return { ok: true, emissions: [toAll(this.eventMessage({ k: 'gameStarted' }))] };
+    return {
+      ok: true,
+      // Roughly one opening deal in thirty has no set in it, and that is resolved
+      // here exactly as it is mid-game.
+      emissions: [toAll(this.eventMessage({ k: 'gameStarted' })), ...this.evaluateBoard()],
+    };
   }
 
   /**
@@ -496,7 +523,7 @@ export class GameRoom {
     );
     emissions.push(...this.reassignHostIfNeeded());
     this.beginGame();
-    emissions.push(toAll(this.eventMessage({ k: 'gameStarted' })));
+    emissions.push(toAll(this.eventMessage({ k: 'gameStarted' })), ...this.evaluateBoard());
     return { ok: true, emissions };
   }
 
@@ -552,6 +579,11 @@ export class GameRoom {
     const indices = cards.map((id) => this.board.indexOf(id));
     if (indices.some((index) => index < 0)) return reject('board_changed', false);
 
+    // Decided before validity, and after staleness: this board is known to hold
+    // no set and is about to be replaced, so there was no correct claim to make
+    // on it and getting it wrong is not the player's error.
+    if (this.autoDealAt > 0) return reject('no_set_on_board', false);
+
     if (!isSetByIds(cards[0]!, cards[1]!, cards[2]!)) return reject('not_a_set', true);
 
     player.score += 1;
@@ -569,58 +601,16 @@ export class GameRoom {
         }),
       ),
     ];
-    emissions.push(...this.finishIfExhausted());
+    emissions.push(...this.evaluateBoard());
     return emissions;
-  }
-
-  /**
-   * "No SET on board". The server recomputes the answer from the authoritative
-   * board; a wrong call costs the caller a cooldown and never reveals a set.
-   */
-  noSet(playerId: string, boardVersion: number): Emission[] {
-    const now = this.env.now();
-    const player = this.findPlayer(playerId);
-    if (!player) return [];
-
-    const reject = (reason: NoSetRejectReason, cooldown: boolean): Emission[] => {
-      if (cooldown) player.cooldownUntil = now + INVALID_ACTION_COOLDOWN_MS;
-      const emissions: Emission[] = [
-        toPlayer(playerId, {
-          t: 'noSetRejected',
-          reason,
-          cooldownUntil: player.cooldownUntil,
-          serverTime: now,
-        }),
-      ];
-      if (reason === 'set_exists') {
-        emissions.push(
-          toAll(
-            this.eventMessage({ k: 'noSetRejected', playerId: player.id, playerName: player.name }),
-          ),
-        );
-      }
-      return emissions;
-    };
-
-    if (this.phase !== 'playing') return reject('not_playing', false);
-    if (now < player.cooldownUntil) return reject('cooldown', false);
-    if (boardVersion !== this.boardVersion) return reject('board_changed', false);
-    if (hasSet(this.board)) return reject('set_exists', true);
-
-    if (this.deck.length >= SET_SIZE) {
-      // No cap check here, and none is needed: a correct "no SET" call cannot
-      // happen on a 21-card board, because 21 face-up cards always contain one.
-      return this.dealMore(player, 'noSet');
-    }
-    // Correct call and nothing left to deal: the game is over.
-    return this.finishGame();
   }
 
   /**
    * Ask for (or stop asking for) three more cards on top of the current board.
    *
-   * This is the only way to grow the board while a SET is still findable, and it
-   * takes the whole table: every connected player has to be asking. That keeps it
+   * This is the way to grow the board while a SET is still findable — a board
+   * with none grows on its own — and it takes the whole table: every connected
+   * player has to be asking. That keeps it
    * from becoming a way for one stuck player to wreck a position someone else can
    * already see, while still giving a table that is collectively stuck a way out
    * that does not cost anybody a cooldown.
@@ -664,7 +654,7 @@ export class GameRoom {
     this.dealVotes.push(playerId);
     if (this.dealVoteExpiresAt === 0) this.dealVoteExpiresAt = this.env.now() + DEAL_VOTE_TTL_MS;
 
-    if (this.everyoneWantsMore()) return this.dealMore(player, 'agreed');
+    if (this.everyoneWantsMore()) return this.dealMore('agreed');
     return [
       toAll(
         this.eventMessage({
@@ -705,8 +695,9 @@ export class GameRoom {
     if (now < availableAt) return reject('too_soon');
 
     const set = findFirstSet(this.board);
-    // Nothing to point at. Saying so is not a leak — it is exactly what the
-    // "No SET on board" button is for, and the player learns no card from it.
+    // Nothing to point at. Saying so is not a leak, and in practice it is a race
+    // this player just lost: the server has already announced the dead board and
+    // three cards are on their way.
     if (!set) return reject('no_set');
 
     return [
@@ -733,7 +724,7 @@ export class GameRoom {
 
   serialize(): SerializedRoom {
     return {
-      s: 2,
+      s: 3,
       code: this.code,
       phase: this.phase,
       players: this.players.map((p) => ({ ...p })),
@@ -746,6 +737,7 @@ export class GameRoom {
       dealVotes: this.dealVotes.slice(),
       dealVoteExpiresAt: this.dealVoteExpiresAt,
       boardSince: this.boardSince,
+      autoDealAt: this.autoDealAt,
     };
   }
 
@@ -765,16 +757,21 @@ export class GameRoom {
     room.setsFound = data.setsFound;
     room.seatCounter = data.seatCounter;
     room.emptySince = data.emptySince ?? now;
-    if (data.s === 2) {
+    if (data.s === 1) {
+      // A v1 room predates the shared vote and the hint clock. Nobody is asking
+      // for cards, and the hint clock restarts now rather than unlocking a hint
+      // the moment the room comes back.
+      room.boardSince = now;
+    } else {
       room.dealVotes = data.dealVotes.slice();
       room.dealVoteExpiresAt = data.dealVoteExpiresAt;
       room.boardSince = data.boardSince;
-    } else {
-      // A v1 room predates both features. Nobody is asking for cards, and the
-      // hint clock restarts now rather than unlocking a hint the moment the room
-      // comes back.
-      room.boardSince = now;
     }
+    // The pending deal is recomputed rather than restored: the stored deadline
+    // belongs to a clock that stopped when the room was evicted. Doing it for
+    // every version also rescues a room stored under the old rules while parked
+    // on a set-less board, which nobody can resolve now that the call is gone.
+    room.autoDealAt = room.phase === 'playing' && !hasSet(room.board) ? now + NO_SET_PAUSE_MS : 0;
     room.hostId = null;
     room.reassignHostIfNeeded();
     return room;
@@ -837,11 +834,14 @@ export class GameRoom {
    *
    * Everything that keys off "this board" resets here, in one place: stale claims
    * are rejected by the version, a pending request for more cards is cancelled
-   * because it was made about a different board, and the hint clock starts over.
+   * because it was made about a different board, the hint clock starts over, and
+   * any pending automatic deal is dropped — `evaluateBoard` decides afresh
+   * whether the board that replaced it needs one.
    */
   private bumpBoard(): void {
     this.boardVersion += 1;
     this.boardSince = this.env.now();
+    this.autoDealAt = 0;
     this.clearDealVotes();
   }
 
@@ -872,25 +872,53 @@ export class GameRoom {
       return [];
     }
     if (!this.everyoneWantsMore() || !this.canDealMore()) return [];
-    const player = this.findPlayer(this.dealVotes[0]!);
-    return player ? this.dealMore(player, 'agreed') : [];
+    return this.dealMore('agreed');
   }
 
-  /** Put three more cards on the table and announce why. */
-  private dealMore(player: PlayerRecord, reason: 'noSet' | 'agreed'): Emission[] {
+  /**
+   * Put three more cards on the table, announce why, and look at what that
+   * produced — a fresh deal can be set-less all over again.
+   */
+  private dealMore(reason: 'auto' | 'agreed'): Emission[] {
     this.board.push(...this.draw(SET_SIZE));
     this.bumpBoard();
     return [
-      toAll(
-        this.eventMessage({
-          k: 'cardsAdded',
-          count: SET_SIZE,
-          playerId: player.id,
-          playerName: player.name,
-          reason,
-        }),
-      ),
+      toAll(this.eventMessage({ k: 'cardsAdded', count: SET_SIZE, reason })),
+      ...this.evaluateBoard(),
     ];
+  }
+
+  /**
+   * Decide what a board that has just changed means for the table.
+   *
+   * A board with a set needs nothing. A board without one is announced the
+   * instant the server knows — players are never left hunting a position that
+   * cannot be claimed from — and three cards are scheduled to land a beat later,
+   * long enough to read the announcement and watch them arrive. When there is
+   * nothing left to deal, that same dead board ends the game.
+   */
+  private evaluateBoard(): Emission[] {
+    if (this.phase !== 'playing') {
+      this.autoDealAt = 0;
+      return [];
+    }
+    if (hasSet(this.board)) {
+      this.autoDealAt = 0;
+      return [];
+    }
+    if (!this.canDealMore()) {
+      this.autoDealAt = 0;
+      return [toAll(this.eventMessage({ k: 'noSetOnBoard', dealsAt: 0 })), ...this.finishGame()];
+    }
+    this.autoDealAt = this.env.now() + NO_SET_PAUSE_MS;
+    return [toAll(this.eventMessage({ k: 'noSetOnBoard', dealsAt: this.autoDealAt }))];
+  }
+
+  /** The pause on a set-less board is up: deal, or end the game. */
+  private resolveSetlessBoard(): Emission[] {
+    this.autoDealAt = 0;
+    if (this.canDealMore()) return this.dealMore('auto');
+    return this.finishGame();
   }
 
   private beginGame(): void {
@@ -925,15 +953,9 @@ export class GameRoom {
     this.bumpBoard();
   }
 
-  /** End the game when the deck is empty and no set remains on the board. */
-  private finishIfExhausted(): Emission[] {
-    if (this.deck.length > 0) return [];
-    if (hasSet(this.board)) return [];
-    return this.finishGame();
-  }
-
   private finishGame(): Emission[] {
     this.phase = 'finished';
+    this.autoDealAt = 0;
     for (const player of this.players) player.wantsRematch = false;
     const best = this.players.reduce((max, p) => Math.max(max, p.score), 0);
     const winners = this.players.filter((p) => p.score === best);
@@ -968,6 +990,11 @@ export function checkRoomInvariants(room: GameRoom): string[] {
     if (board.length > MAX_BOARD_SIZE) problems.push('board grew past the cap');
     if (room.getDeckRemaining() > 0 && board.length < INITIAL_BOARD_SIZE) {
       problems.push('board is under-filled while the deck still has cards');
+    }
+    // The players are never left on a dead board: either a set is there to be
+    // found, or the cards that resolve it are already on the clock.
+    if (!hasSet(board) && room.getAutoDealAt() === 0) {
+      problems.push('a set-less board was left with no deal pending');
     }
   }
   if (room.getPhase() === 'finished' && room.getDeckRemaining() > 0 && hasSet(board)) {

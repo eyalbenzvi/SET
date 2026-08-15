@@ -70,7 +70,8 @@ export const he = {
 
   'game.claim': 'מצאתי SET',
   'game.claimSelected': 'מצאתי SET ({count}/3)',
-  'game.noSet': 'אין SET על השולחן',
+  'game.noSetOnBoard': 'אין SET על השולחן',
+  'game.noSetAdding': 'מוסיפים 3 קלפים…',
   'game.deckLeft': 'נשארו {count}',
   'game.deckLeftLabel': '{count} קלפים נשארו בקופה',
   'game.setsFound': 'נמצאו {count}',
@@ -101,7 +102,7 @@ export const he = {
   'hint.revealedOne': 'קלף אחד מתוך SET מסומן. מצאו את השניים האחרים.',
   'hint.revealedTwo': 'שני קלפים מתוך SET מסומנים — יש בדיוק קלף אחד שמשלים אותם.',
   'hint.tooSoon': 'הרמז ייפתח בעוד {seconds} שנ׳.',
-  'hint.noSet': 'אין SET על השולחן הזה — הקישו «אין SET על השולחן».',
+  'hint.noSet': 'אין SET על השולחן הזה — שלושה קלפים כבר בדרך.',
 
   'deal.deckEmpty': 'הקופה ריקה, אין יותר קלפים לחלוקה.',
   'deal.boardFull': 'השולחן הגיע לגודל המקסימלי.',
@@ -110,6 +111,8 @@ export const he = {
   'feed.setFoundYou': 'מצאתם SET \u200e+1',
   'feed.invalidClaim': 'ל{name} לא היה SET',
   'feed.invalidClaimYou': 'זה לא SET',
+  'feed.noSetOnBoard': 'אין SET על השולחן — מוסיפים 3 קלפים',
+  'feed.noSetFinal': 'אין SET על השולחן ולא נשארו קלפים',
   'feed.cardsAdded': 'נוספו 3 קלפים',
   'feed.cardsAddedAgreed': 'כולם הסכימו — נוספו 3 קלפים',
   'feed.dealAsked': '{name} רוצה עוד 3 קלפים ({votes}/{needed})',
@@ -118,7 +121,6 @@ export const he = {
   'feed.dealWithdrewYou': 'הבקשה בוטלה',
   'feed.dealLapsed': 'אף אחד אחר לא הסכים, הבקשה בוטלה',
   'feed.hintUsed': '{name} לקח רמז',
-  'feed.noSetRejected': '{name} הכריז שאין SET, אבל יש',
   'feed.playerJoined': '{name} הצטרף',
   'feed.playerLeft': '{name} יצא',
   'feed.playerDisconnected': '{name} התנתק',
@@ -133,7 +135,7 @@ export const he = {
   'reject.cooldown': 'רגע אחד — המתינו לטיימר.',
   'reject.notPlaying': 'המשחק לא פעיל.',
   'reject.invalidCards': 'בחרו שלושה קלפים שונים מהשולחן.',
-  'reject.setExists': 'עדיין יש SET על השולחן.',
+  'reject.noSetOnBoard': 'אין SET על השולחן הזה — המתינו לקלפים החדשים.',
 
   'attribute.count': 'כמות',
   'attribute.shape': 'צורה',
@@ -195,9 +197,9 @@ export const he = {
   'tutorial.flowRefill':
     'השולחן מתמלא מעצמו בחזרה לשנים־עשר קלפים מהקופה, כך שכמעט תמיד יש שנים־עשר קלפים לפניכם.',
   'tutorial.flowNoSet':
-    'אם אף אחד לא מוצא SET, כל שחקן יכול להקיש «אין SET על השולחן». אם באמת אין — נוספים שלושה קלפים (חמישה־עשר, אחר כך שמונה־עשר), ולא מתחלפים קלפים עד שהשולחן חוזר לשנים־עשר.',
+    'לפעמים באמת אין SET על השולחן. אתם לא צריכים לשים לב לזה ולא להכריז: המשחק בודק אחרי כל שינוי, מודיע מיד על השולחן, וכעבור רגע מוסיף שלושה קלפים (חמישה־עשר, אחר כך שמונה־עשר). לא מתחלפים קלפים עד שהשולחן חוזר לשנים־עשר.',
   'tutorial.flowMoreCards':
-    'נתקעתם אבל לא בטוחים שאין SET? הקישו «\u200e+3 קלפים». שום דבר לא קורה עד שכל השחקנים הקישו, ואז נוספים שלושה קלפים — כך שחקן אחד לא יכול להרוס מצב שמישהו אחר כבר ראה.',
+    'נתקעתם, אבל יש SET על השולחן איפשהו? הקישו «\u200e+3 קלפים». שום דבר לא קורה עד שכל השחקנים הקישו, ואז נוספים שלושה קלפים — כך שחקן אחד לא יכול להרוס מצב שמישהו אחר כבר ראה.',
   'tutorial.flowHints':
     'אחרי 30 שניות על אותו שולחן, «רמז 1» מסמן קלף אחד שהוא באמת חלק מ-SET. ‎30 שניות אחר כך «רמז 2» מסמן שניים, ואז נשאר בדיוק קלף אחד שמשלים אותם. שני הטיימרים מתאפסים בכל שינוי בשולחן, ורק אתם רואים את הרמז שלכם.',
   'tutorial.flowLastSet':

@@ -180,11 +180,13 @@ describe('parseClientMessage', () => {
   });
 
   it('accepts and validates the remaining message types', () => {
-    expect(parseClientMessage(encode({ t: 'noSet', boardVersion: 0 })).ok).toBe(true);
-    expect(expectRejected(encode({ t: 'noSet' }))).toContain('boardVersion');
     for (const t of ['start', 'rematch', 'leave', 'ping']) {
       expect(parseClientMessage(encode({ t }))).toEqual({ ok: true, value: { t } });
     }
+  });
+
+  it('no longer accepts a "no SET" call, which the server now decides itself', () => {
+    expect(expectRejected(encode({ t: 'noSet', boardVersion: 0 }))).toContain('unknown message');
   });
 
   it('accepts a request for more cards, either way round', () => {

@@ -22,7 +22,6 @@ import {
   type HintLevel,
   type HintRejectedMessage,
   type HintRevealedMessage,
-  type NoSetRejectedMessage,
   type PublicState,
   type ServerMessage,
 } from '@set/shared';
@@ -232,6 +231,19 @@ export class Store {
     return remaining > 0 ? Math.ceil(remaining / 1_000) : 0;
   }
 
+  /**
+   * True while the server has announced a set-less board and the three cards
+   * that resolve it have not landed yet.
+   *
+   * The board is unclaimable for that moment, so the UI stops taking taps on it
+   * rather than letting a player spend the pause building a claim that cannot be
+   * right.
+   */
+  noSetPending(): boolean {
+    const room = this.state.room;
+    return room !== null && room.phase === 'playing' && room.autoDealAt > 0;
+  }
+
   /** True when this player is one of those asking for three more cards. */
   iWantMoreCards(): boolean {
     const { room, meId } = this.state;
@@ -432,6 +444,7 @@ export class Store {
     const room = this.state.room;
     if (room?.phase !== 'playing') return;
     if (this.cooldownSeconds() > 0) return;
+    if (this.noSetPending()) return;
     const change = toggleSelection(this.state.selection, cardId, room.board);
     if (change.blocked) {
       this.emit({ kind: 'blocked' });
@@ -448,19 +461,12 @@ export class Store {
   claim(): void {
     const room = this.state.room;
     if (!room || this.state.selection.length !== 3) return;
-    if (this.cooldownSeconds() > 0) return;
+    if (this.cooldownSeconds() > 0 || this.noSetPending()) return;
     this.connection?.send({
       t: 'claim',
       cards: [...this.state.selection],
       boardVersion: room.boardVersion,
     });
-  }
-
-  callNoSet(): void {
-    const room = this.state.room;
-    if (room?.phase !== 'playing') return;
-    if (this.cooldownSeconds() > 0) return;
-    this.connection?.send({ t: 'noSet', boardVersion: room.boardVersion });
   }
 
   /**
@@ -473,6 +479,9 @@ export class Store {
   toggleMoreCards(): void {
     const room = this.state.room;
     if (room?.phase !== 'playing') return;
+    // Cards are already on their way; asking for more would be about a board that
+    // is about to be replaced.
+    if (this.noSetPending()) return;
     this.connection?.send({
       t: 'deal',
       want: !this.iWantMoreCards(),
@@ -584,9 +593,6 @@ export class Store {
       case 'claimRejected':
         this.handleClaimRejected(message);
         return;
-      case 'noSetRejected':
-        this.handleNoSetRejected(message);
-        return;
       case 'hintRevealed':
         this.handleHintRevealed(message);
         return;
@@ -640,6 +646,12 @@ export class Store {
           'info',
         );
         return;
+      case 'noSetOnBoard':
+        // Nobody called this and nobody can act on it: it is the table being told
+        // to stop looking, so it clears the selection everyone was building.
+        this.patch({ selection: [], hint: null });
+        this.pushToast(event.dealsAt > 0 ? t('feed.noSetOnBoard') : t('feed.noSetFinal'), 'info');
+        return;
       case 'dealVote': {
         if (mine) {
           this.setFeedback(
@@ -668,9 +680,6 @@ export class Store {
       case 'hintUsed':
         // Everyone hears that a hint was taken, but never which cards it named.
         if (!mine) this.pushToast(t('feed.hintUsed', { name: event.playerName }), 'info');
-        return;
-      case 'noSetRejected':
-        if (!mine) this.pushToast(t('feed.noSetRejected', { name: event.playerName }), 'bad');
         return;
       case 'playerJoined':
         this.pushToast(t('feed.playerJoined', { name: event.playerName }), 'info');
@@ -755,24 +764,15 @@ export class Store {
         this.setFeedback(t('reject.notPlaying'), 'info');
         this.patch({ cooldownUntil });
         return;
+      case 'no_set_on_board':
+        // Not a mistake, so no cooldown and no red: the claim was made in the
+        // moment between the announcement and the cards arriving.
+        this.setFeedback(t('reject.noSetOnBoard'), 'info');
+        this.patch({ selection: [], cooldownUntil });
+        return;
       default:
         return;
     }
-  }
-
-  private handleNoSetRejected(message: NoSetRejectedMessage): void {
-    const cooldownUntil =
-      message.cooldownUntil > 0 ? message.cooldownUntil - (message.serverTime - Date.now()) : 0;
-    const text =
-      message.reason === 'set_exists'
-        ? t('reject.setExists')
-        : message.reason === 'cooldown'
-          ? t('reject.cooldown')
-          : message.reason === 'board_changed'
-            ? t('reject.boardChanged')
-            : t('reject.notPlaying');
-    this.setFeedback(text, message.reason === 'set_exists' ? 'bad' : 'info');
-    this.patch({ cooldownUntil, announcement: text });
   }
 
   private handleHintRevealed(message: HintRevealedMessage): void {

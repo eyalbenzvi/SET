@@ -89,7 +89,7 @@ test.describe('layout and visual states', () => {
     }
 
     // Both primary controls are on screen and large enough to tap.
-    for (const id of ['claim', 'no-set']) {
+    for (const id of ['claim', 'more-cards']) {
       const box = await maya.page.getByTestId(id).boundingBox();
       expect(box, id).not.toBeNull();
       expect(box!.height).toBeGreaterThanOrEqual(44);
@@ -121,22 +121,27 @@ test.describe('layout and visual states', () => {
     await joinByLink(david, code);
     await startGame(maya, david);
 
-    // Force the board to grow by calling "no SET" until it is rejected — any
-    // rejection means a set exists, so instead grow it via genuine no-set calls
-    // where possible, and otherwise accept the 12-card board.
-    let size = 12;
-    for (let attempt = 0; attempt < 4 && size < 18; attempt++) {
-      const before = size;
-      await maya.page.getByTestId('no-set').click();
-      await maya.page.waitForTimeout(400);
-      size = (await boardCardIds(maya.page)).length;
-      if (size === before) break; // rejected: a set exists, cooldown now applies
+    // Grow the board the way a stuck table does: both players ask for three more
+    // cards, until there are eighteen. `ensureSetOnBoard` first each round, so a
+    // request is never made against a board the server is already replacing —
+    // and a board it grew on its own counts towards the eighteen just the same.
+    for (let guard = 0; guard < 6; guard++) {
+      await ensureSetOnBoard(maya.page);
+      const current = (await boardCardIds(maya.page)).length;
+      if (current >= 18) break;
+      await maya.page.getByTestId('more-cards').click();
+      await david.page.getByTestId('more-cards').click();
+      for (const player of [maya, david]) {
+        await expect(player.page.locator('.card:not(.card--exit)')).toHaveCount(current + 3, {
+          timeout: 15_000,
+        });
+      }
     }
 
     await expectNoHorizontalScroll(maya.page);
-    const cards = await maya.page.locator('.card').count();
-    expect(cards).toBeGreaterThanOrEqual(12);
-    if (size >= 15) await shot(maya.page, `game-${String(size)}cards`, testInfo.project.name);
+    const size = (await boardCardIds(maya.page)).length;
+    expect(size).toBeGreaterThanOrEqual(18);
+    await shot(maya.page, `game-${String(size)}cards`, testInfo.project.name);
 
     await closePlayers(maya, david);
   });

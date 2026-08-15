@@ -93,41 +93,23 @@ export async function boardCardIds(page: Page): Promise<CardId[]> {
 /**
  * A valid SET on the current board, computed by the shared rules engine.
  *
- * About one deal in thirty contains no set at all, so this resolves that
- * position exactly as a player would — by calling "No SET on board" until three
- * more cards produce one.
+ * About one deal in thirty contains no set at all. Nobody has to call that any
+ * more: the server announces it and deals three cards by itself, so this waits
+ * that out exactly as a player does.
  */
 export async function ensureSetOnBoard(page: Page): Promise<CardId[]> {
   for (let attempt = 0; attempt < 8; attempt++) {
     const board = await boardCardIds(page);
     const found = findFirstSet(board);
     if (found) return [...found];
-    const noSet = page.getByTestId('no-set');
-    await expect(noSet).toBeEnabled();
-    await noSet.click();
+    await expect(page.getByTestId('no-set-notice')).toBeVisible({ timeout: 5_000 });
     await page.waitForFunction(
       (previous: number) => document.querySelectorAll('.card:not(.card--exit)').length > previous,
       board.length,
-      { timeout: 10_000 },
+      { timeout: 15_000 },
     );
   }
   throw new Error('could not reach a board containing a set');
-}
-
-/**
- * Poll `probe` until it returns something other than `null`.
- *
- * Used where a test must wait for one of several authoritative outcomes rather
- * than assert on a single element, which would race with the server reply.
- */
-export async function pollUntil<T>(probe: () => Promise<T | null>, timeoutMs = 10_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const result = await probe();
-    if (result !== null) return result;
-    if (Date.now() > deadline) throw new Error('timed out waiting for an outcome');
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
 }
 
 /** Three face-up cards that are definitely not a SET. */
@@ -193,11 +175,11 @@ async function isFinished(page: Page): Promise<boolean> {
 /**
  * Wait until this player is free to act.
  *
- * "No SET on board" is disabled for exactly one reason — this player's own
- * cooldown after a wrong call — so it doubles as the "am I cooling down?" signal.
+ * The claim button counts a cooldown down in its own label, so it is both the
+ * control being waited on and the "am I cooling down?" signal.
  */
 async function waitOutCooldown(page: Page): Promise<void> {
-  await expect(page.getByTestId('no-set')).toBeEnabled({ timeout: 15_000 });
+  await expect(page.getByTestId('claim')).not.toContainText(/Wait \d+s/, { timeout: 15_000 });
 }
 
 /**
@@ -216,7 +198,8 @@ async function clearSelection(page: Page): Promise<void> {
 
 /**
  * Play a whole game out by having players alternately claim any available set,
- * or call "no SET" when the board has none. Returns when the game finishes.
+ * waiting out the server's own resolution when a board has none. Returns when
+ * the game finishes.
  */
 export async function playToCompletion(players: PlayerSession[]): Promise<void> {
   // A full game is at most 27 claims plus a handful of "no SET" calls; the budget
@@ -231,9 +214,9 @@ export async function playToCompletion(players: PlayerSession[]): Promise<void> 
     if (board.length === 0) return;
     const found = findFirstSet(board);
     if (!found) {
-      const noSet = actor.page.getByTestId('no-set');
-      if (await noSet.isEnabled()) await noSet.click();
-      await actor.page.waitForTimeout(250);
+      // Nothing to do but wait: the server resolves a dead board on its own,
+      // either by dealing three cards or by ending the game.
+      await actor.page.waitForTimeout(600);
       continue;
     }
 

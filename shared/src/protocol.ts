@@ -14,7 +14,7 @@
 import { SET_SIZE, isCardId, type CardId } from './cards.js';
 import type { AttributeMismatch } from './rules.js';
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /** Room limits. */
 export const MIN_PLAYERS = 2;
@@ -25,7 +25,7 @@ export const ROOM_CODE_LENGTH = 6;
 export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 /**
- * Cooldown applied to a single player after an invalid claim or bad no-set call.
+ * Cooldown applied to a single player after an invalid claim.
  *
  * Short on purpose: it exists to stop rapid guessing, not to bench a player while
  * the board they were looking at gets taken from under them.
@@ -48,6 +48,16 @@ export const ROOM_IDLE_TTL_MS = 30 * 60_000;
 export const MAX_BOARD_SIZE = 21;
 /** How long an open request for more cards waits for the table before it lapses. */
 export const DEAL_VOTE_TTL_MS = 45_000;
+/**
+ * How long a board that provably contains no SET stays on screen before three
+ * more cards land on it.
+ *
+ * Nobody has to notice the position is dead and nobody has to call it: the server
+ * knows the moment the board changes, says so, and deals. The pause exists purely
+ * so the announcement is readable and the three new cards are seen arriving,
+ * rather than the board silently growing under everyone's eyes.
+ */
+export const NO_SET_PAUSE_MS = 1_500;
 /** Time on an unchanged board before the first hint unlocks. */
 export const HINT_LEVEL_1_AFTER_MS = 30_000;
 /** ...and before the second, stronger hint unlocks: another 30 seconds. */
@@ -113,6 +123,15 @@ export interface PublicState {
    * the clock restarts whenever the position in front of the players changes.
    */
   boardSince: number;
+  /**
+   * Server clock at which three cards will be dealt automatically because the
+   * board provably contains no SET; 0 whenever a SET is findable.
+   *
+   * Non-zero means "stop searching, cards are on the way": clients freeze
+   * selection for that moment, and the server refuses claims made in it rather
+   * than punishing a player for a board that cannot be claimed from.
+   */
+  autoDealAt: number;
 }
 
 /* ------------------------------------------------------------------ *
@@ -129,17 +148,19 @@ export type GameEvent =
   | { k: 'setFound'; playerId: string; playerName: string; cards: CardId[]; score: number }
   | { k: 'invalidClaim'; playerId: string; playerName: string }
   /**
-   * Three cards went onto the board — either because a correct "no SET" call
-   * forced it (`noSet`) or because the whole table asked for them (`agreed`).
+   * Three cards went onto the board — either because the board had no SET and the
+   * server dealt them on its own (`auto`), or because the whole table asked for
+   * them (`agreed`).
    */
-  | {
-      k: 'cardsAdded';
-      count: number;
-      playerId: string;
-      playerName: string;
-      reason: 'noSet' | 'agreed';
-    }
-  | { k: 'noSetRejected'; playerId: string; playerName: string }
+  | { k: 'cardsAdded'; count: number; reason: 'auto' | 'agreed' }
+  /**
+   * The board provably contains no SET. Announced the instant the server knows,
+   * so nobody searches a dead position.
+   *
+   * `dealsAt` is the server clock at which three cards will land; it is 0 when
+   * there is nothing left to deal, in which case a `gameOver` follows immediately.
+   */
+  | { k: 'noSetOnBoard'; dealsAt: number }
   /** A player asked for three more cards, or took their request back. */
   | {
       k: 'dealVote';
@@ -183,11 +204,6 @@ export interface ClaimMessage {
   boardVersion: number;
 }
 
-export interface NoSetMessage {
-  t: 'noSet';
-  boardVersion: number;
-}
-
 /**
  * "I want three more cards dealt" (`want: true`), or "never mind" (`want: false`).
  * Cards are only dealt once every connected player is asking.
@@ -221,7 +237,6 @@ export type ClientMessage =
   | HelloMessage
   | StartMessage
   | ClaimMessage
-  | NoSetMessage
   | DealMessage
   | HintMessage
   | RematchMessage
@@ -246,9 +261,13 @@ export type ErrorCode =
   | 'internal_error';
 
 export type ClaimRejectReason =
-  'not_a_set' | 'board_changed' | 'cooldown' | 'not_playing' | 'invalid_cards';
-
-export type NoSetRejectReason = 'set_exists' | 'cooldown' | 'not_playing' | 'board_changed';
+  | 'not_a_set'
+  | 'board_changed'
+  | 'cooldown'
+  | 'not_playing'
+  | 'invalid_cards'
+  /** The board has no SET and three cards are already on their way. */
+  | 'no_set_on_board';
 
 export type DealRejectReason = 'deck_empty' | 'board_full' | 'not_playing' | 'board_changed';
 
@@ -279,14 +298,6 @@ export interface ClaimRejectedMessage {
   reason: ClaimRejectReason;
   /** Present for `not_a_set`: the attribute that had two the same and one different. */
   mismatch: AttributeMismatch | null;
-  cooldownUntil: number;
-  serverTime: number;
-}
-
-/** Private feedback for the player who called "no SET". */
-export interface NoSetRejectedMessage {
-  t: 'noSetRejected';
-  reason: NoSetRejectReason;
   cooldownUntil: number;
   serverTime: number;
 }
@@ -339,7 +350,6 @@ export type ServerMessage =
   | StateMessage
   | EventMessage
   | ClaimRejectedMessage
-  | NoSetRejectedMessage
   | HintRevealedMessage
   | HintRejectedMessage
   | DealRejectedMessage
@@ -448,12 +458,6 @@ export function parseClientMessage(raw: unknown): ParseResult<ClientMessage> {
         return { ok: false, error: 'claim.boardVersion invalid' };
       }
       return { ok: true, value: { t: 'claim', cards: ids, boardVersion: parsed['boardVersion'] } };
-    }
-    case 'noSet': {
-      if (!isBoardVersion(parsed['boardVersion'])) {
-        return { ok: false, error: 'noSet.boardVersion invalid' };
-      }
-      return { ok: true, value: { t: 'noSet', boardVersion: parsed['boardVersion'] } };
     }
     case 'deal': {
       if (typeof parsed['want'] !== 'boolean') return { ok: false, error: 'deal.want invalid' };

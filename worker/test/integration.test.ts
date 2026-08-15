@@ -12,6 +12,7 @@ import {
   MAX_MESSAGE_BYTES,
   HINT_LEVEL_1_AFTER_MS,
   MAX_BOARD_SIZE,
+  NO_SET_PAUSE_MS,
   MAX_PLAYERS,
   PROTOCOL_VERSION,
   findFirstSet,
@@ -343,7 +344,7 @@ describe('gameplay over the wire', () => {
   });
 
   it('broadcasts an accepted claim, the score and the new board to both players', async () => {
-    const { host, guest } = await playing();
+    const { host, guest } = await playingWhere(hasSet);
     const state = host.state();
     const cards = setOn(state);
     host.send({ t: 'claim', cards, boardVersion: state.boardVersion });
@@ -363,7 +364,7 @@ describe('gameplay over the wire', () => {
   });
 
   it('privately explains an invalid claim and cools down only that player', async () => {
-    const { host, guest } = await playing();
+    const { host, guest } = await playingWhere(hasSet);
     const state = host.state();
     const cards = nonSetOn(state);
     host.send({ t: 'claim', cards, boardVersion: state.boardVersion });
@@ -386,7 +387,7 @@ describe('gameplay over the wire', () => {
   });
 
   it('lets exactly one of two simultaneous claims win', async () => {
-    const { host, guest } = await playing();
+    const { host, guest } = await playingWhere(hasSet);
     const state = host.state();
     const cards = setOn(state);
     // Both frames are put on the wire before either is processed.
@@ -406,7 +407,7 @@ describe('gameplay over the wire', () => {
   });
 
   it('rejects a stale claim referring to cards that are gone', async () => {
-    const { host, guest } = await playing();
+    const { host, guest } = await playingWhere(hasSet);
     const state = host.state();
     const cards = setOn(state);
     host.send({ t: 'claim', cards, boardVersion: state.boardVersion });
@@ -417,43 +418,50 @@ describe('gameplay over the wire', () => {
     expect(rejection.reason).toBe('board_changed');
   });
 
-  it('rejects "no SET" when a set exists, without revealing it', async () => {
-    const { host, guest } = await playingWhere(hasSet);
-    const state = host.state();
-    expect(hasSet(state.board)).toBe(true);
-    host.send({ t: 'noSet', boardVersion: state.boardVersion });
-
-    const rejection = await host.waitFor((m) => m.t === 'noSetRejected');
-    expect(rejection).toMatchObject({ reason: 'set_exists' });
-    await guest.waitForEvent('noSetRejected');
-    // Board unchanged, and no card list was disclosed anywhere.
-    expect(guest.state().board).toEqual(state.board);
-    expect(guest.state().boardVersion).toBe(state.boardVersion);
-  });
-
-  it('deals three more cards when the board genuinely has no set', async () => {
+  it('announces a set-free board to everyone and deals three cards on its own', async () => {
     const { host, guest } = await playingWhere((board) => !hasSet(board));
     const state = host.state();
-    host.send({ t: 'noSet', boardVersion: state.boardVersion });
+    // Nobody sent anything: the announcement rode out of `start` itself.
+    expect(state.autoDealAt).toBeGreaterThan(state.serverTime);
+
+    const announced = await guest.waitForEvent('noSetOnBoard');
+    expect(announced.dealsAt).toBeGreaterThan(0);
 
     const event = await guest.waitForEvent('cardsAdded');
-    expect(event).toMatchObject({ count: 3, playerName: 'Maya' });
+    expect(event).toMatchObject({ count: 3, reason: 'auto' });
     const updated = await guest.waitForState((s) => s.board.length === 15);
     // The existing twelve keep their slots, so nothing moves under the players.
     expect(updated.board.slice(0, 12)).toEqual(state.board);
     expect(updated.deckRemaining).toBe(state.deckRemaining - 3);
     expect(updated.players.every((p) => p.cooldownUntil === 0)).toBe(true);
+    expect(updated.autoDealAt).toBe(0);
+  }, 180_000);
+
+  it('refuses a claim made on a board it has already called dead, at no cost', async () => {
+    const { host, guest } = await playingWhere((board) => !hasSet(board));
+    const state = host.state();
+    host.send({ t: 'claim', cards: nonSetOn(state), boardVersion: state.boardVersion });
+
+    const rejection = await host.waitFor<ClaimRejectedMessage>((m) => m.t === 'claimRejected');
+    expect(rejection.reason).toBe('no_set_on_board');
+    expect(rejection.cooldownUntil).toBe(0);
+    // ...and the cards still arrive, for everybody, right after.
+    const updated = await guest.waitForState((s) => s.board.length === 15);
+    expect(updated.players.every((p) => p.cooldownUntil === 0)).toBe(true);
   }, 180_000);
 
   it('does not replace claimed cards while the board is larger than twelve', async () => {
     const { host, guest } = await playingWhere((board) => !hasSet(board));
-    host.send({ t: 'noSet', boardVersion: host.state().boardVersion });
     const grown = await host.waitForState((s) => s.board.length === 15);
     expect(hasSet(grown.board)).toBe(true);
 
     const cards = setOn(grown);
     host.send({ t: 'claim', cards, boardVersion: grown.boardVersion });
-    const shrunk = await guest.waitForState((s) => s.board.length === INITIAL_BOARD_SIZE);
+    // Pinned to the version: the guest's 12-card board *before* the deal would
+    // otherwise satisfy a bare length check and race this assertion.
+    const shrunk = await guest.waitForState(
+      (s) => s.boardVersion > grown.boardVersion && s.board.length === INITIAL_BOARD_SIZE,
+    );
     expect(shrunk.deckRemaining).toBe(grown.deckRemaining);
     for (const id of cards) expect(shrunk.board).not.toContain(id);
   }, 180_000);
@@ -470,9 +478,11 @@ describe('gameplay over the wire', () => {
         actor.send({ t: 'claim', cards, boardVersion: state.boardVersion });
         await actor.waitForState((s) => s.boardVersion > state.boardVersion);
       } else {
-        actor.send({ t: 'noSet', boardVersion: state.boardVersion });
+        // Nothing to send: the server resolves a dead board by itself, and the
+        // real alarm has to fire for that to happen.
         await actor.waitForState(
           (s) => s.boardVersion > state.boardVersion || s.phase === 'finished',
+          NO_SET_PAUSE_MS + 15_000,
         );
       }
     }
@@ -519,7 +529,7 @@ describe('disconnect, host succession and reconnect', () => {
   });
 
   it('restores identity, name and score on reconnect inside the grace period', async () => {
-    const { code, host, guest } = await playing();
+    const { code, host, guest } = await playingWhere(hasSet);
     const state = host.state();
     host.send({ t: 'claim', cards: setOn(state), boardVersion: state.boardVersion });
     await host.waitForEvent('setFound');
@@ -570,7 +580,7 @@ describe('disconnect, host succession and reconnect', () => {
   });
 
   it('keeps the room usable after everyone reconnects', async () => {
-    const { code, host, guest } = await playing();
+    const { code, host, guest } = await playingWhere(hasSet);
     const hostSeat = { playerId: host.playerId, token: host.token };
     host.close();
     await guest.waitForEvent('playerDisconnected');
@@ -588,7 +598,7 @@ describe('disconnect, host succession and reconnect', () => {
 
 describe('dealing more cards by agreement, over the wire', () => {
   it('waits for the whole table, then deals three cards to everyone', async () => {
-    const { host, guest } = await playing();
+    const { host, guest } = await playingWhere(hasSet);
     const state = host.state();
 
     host.send({ t: 'deal', want: true, boardVersion: state.boardVersion });
@@ -611,7 +621,7 @@ describe('dealing more cards by agreement, over the wire', () => {
   });
 
   it('lets a player withdraw, and tells the table', async () => {
-    const { host, guest } = await playing();
+    const { host, guest } = await playingWhere(hasSet);
     const version = host.state().boardVersion;
     host.send({ t: 'deal', want: true, boardVersion: version });
     await guest.waitForEvent('dealVote');
@@ -638,7 +648,7 @@ describe('dealing more cards by agreement, over the wire', () => {
   });
 
   it('refuses to grow the board past the cap', async () => {
-    const { host, guest } = await playing();
+    const { host, guest } = await playingWhere(hasSet);
     for (let size = INITIAL_BOARD_SIZE; size < MAX_BOARD_SIZE; size += 3) {
       const version = host.state().boardVersion;
       host.send({ t: 'deal', want: true, boardVersion: version });
@@ -654,7 +664,7 @@ describe('dealing more cards by agreement, over the wire', () => {
 
 describe('hints, over the wire', () => {
   it('is locked at the start of a board, and says when it opens', async () => {
-    const { host, guest } = await playing();
+    const { host, guest } = await playingWhere(hasSet);
     const state = host.state();
     const since = guest.mark();
 

@@ -37,7 +37,7 @@ exists:
 | `room.ts`     | `GameRoom` — the authoritative state machine.                |
 | `protocol.ts` | Wire types **and** the runtime validator for inbound frames. |
 
-`GameRoom` takes commands (`join`, `start`, `claim`, `noSet`, `voteDeal`, `hint`,
+`GameRoom` takes commands (`join`, `start`, `claim`, `voteDeal`, `hint`,
 `rematch`, `leave`, `tick`) and returns a list of messages to deliver, each
 addressed to either everyone or one player. It reads the clock and randomness
 through an injected `RoomEnv`, so tests drive it with a fake clock and a seeded
@@ -119,14 +119,20 @@ toasts are only used on the lobby and results screens.
                                                   └──────────┘
 ```
 
-A game ends the moment the deck is empty and the board contains no valid SET —
-either detected right after an accepted claim, or when a correct "No SET on
-board" call finds nothing left to deal.
+A game ends the moment the deck is empty and the board contains no valid SET.
 
-The position "no set on the board, cards still in the deck" is always
-resolvable: any player may call "No SET on board", the server recomputes the
-answer from the authoritative board, and deals three more cards if the caller was
-right. A wrong call costs that caller a cooldown and reveals nothing.
+Nobody has to spot that, and there is nothing to call. After every board change —
+the opening deal, an accepted claim, a deal of three more cards — the server asks
+whether a SET is still findable. When one is not, it broadcasts `noSetOnBoard` at
+once so the table stops searching a dead position, and then either deals three
+more cards `NO_SET_PAUSE_MS` later (long enough to read the announcement and see
+the cards arrive) or, with nothing left to deal, ends the game on the spot.
+
+For that pause the board is out of play: the client stops taking taps on it and
+the server refuses claims against it with `no_set_on_board` — no cooldown, since
+there was no correct claim to make. `PublicState.autoDealAt` carries the deadline,
+so a player who joins or reconnects mid-pause sees the same thing as everyone
+else.
 
 ## Storage and lifetime
 
@@ -134,9 +140,15 @@ The room is persisted to Durable Object storage after every mutation, so an
 eviction mid-game does not lose the board. A restored room starts with every
 player marked disconnected and inside their reconnect grace window.
 
-An alarm handles the two time-based transitions: reclaiming a seat after the
-60-second grace period, and discarding a room that has been empty for 30
-minutes.
+An alarm handles the time-based transitions: dealing three cards onto a board
+that was announced as having no SET, reclaiming a seat after the 60-second grace
+period, lapsing an unanswered request for more cards, and discarding a room that
+has been empty for 30 minutes.
+
+A restored room recomputes its pending deal instead of trusting the stored
+deadline, whose clock stopped when the room was evicted. That also rescues a room
+stored under the older rules while parked on a set-free board, which nothing else
+could resolve now that the manual call is gone.
 
 ## Testing strategy
 
