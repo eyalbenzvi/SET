@@ -32,6 +32,9 @@ test.describe('more cards by agreement', () => {
     const code = await createRoom(maya);
     await joinByLink(david, code);
     await startGame(maya, david);
+    // A dead opening board deals itself three cards, which would cancel the very
+    // request this test is making. Wait for a board that is actually playable.
+    await ensureSetOnBoard(maya.page);
 
     const more = maya.page.getByTestId('more-cards');
     await expect(more).toHaveText('+3 cards');
@@ -52,10 +55,10 @@ test.describe('more cards by agreement', () => {
       // The request is spent, so the button offers a fresh one.
       await expect(player.page.getByTestId('more-cards')).toHaveText('+3 cards');
     }
-    // Nobody was punished for asking: the "No SET" button is the one that goes
-    // dead during a cooldown, and it is still live for both players.
-    await expect(maya.page.getByTestId('no-set')).toBeEnabled();
-    await expect(david.page.getByTestId('no-set')).toBeEnabled();
+    // Nobody was punished for asking: a cooldown would be counting down on the
+    // claim button, and neither player has one.
+    await expect(maya.page.getByTestId('claim')).not.toContainText(/Wait/);
+    await expect(david.page.getByTestId('claim')).not.toContainText(/Wait/);
     await closePlayers(maya, david);
   });
 
@@ -65,6 +68,7 @@ test.describe('more cards by agreement', () => {
     const code = await createRoom(maya);
     await joinByLink(david, code);
     await startGame(maya, david);
+    await ensureSetOnBoard(maya.page);
 
     const mine = maya.page.getByTestId('more-cards');
     await mine.click();

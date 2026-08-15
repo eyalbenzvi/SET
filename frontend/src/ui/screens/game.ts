@@ -31,13 +31,14 @@ export class GameScreen {
   private readonly board: HTMLElement;
   private readonly feedback: HTMLElement;
   private readonly claimButton: HTMLButtonElement;
-  private readonly noSetButton: HTMLButtonElement;
   private readonly deckCounter: HTMLElement;
   private readonly setsCounter: HTMLElement;
   /** Hint level 1 and 2, unlocking on time spent on the current board. */
   private readonly hintButtons: Record<HintLevel, HTMLButtonElement>;
   /** Asks the table for three more cards; also shows how many have agreed. */
   private readonly moreButton: HTMLButtonElement;
+  /** Covers the board while a proven set-less position is being replaced. */
+  private readonly noSetNotice: HTMLElement;
   /** "X took [three cards]" — what the set actually was. */
   private readonly lastSet: HTMLElement;
   private readonly lastSetText: HTMLElement;
@@ -87,10 +88,6 @@ export class GameScreen {
       class: 'btn--claim',
       attrs: { 'data-testid': 'claim' },
     });
-    this.noSetButton = button(t('game.noSet'), 'secondary', () => this.store.callNoSet(), {
-      class: 'btn--noset',
-      attrs: { 'data-testid': 'no-set' },
-    });
     this.leaveButton = button(t('game.leave'), 'ghost', () => this.onLeaveTapped(), {
       class: 'btn--tiny',
       attrs: { 'data-testid': 'leave-game' },
@@ -100,9 +97,23 @@ export class GameScreen {
       1: this.hintButton(1),
       2: this.hintButton(2),
     };
-    this.moreButton = button(t('game.moreCards'), 'ghost', () => this.store.toggleMoreCards(), {
-      class: 'btn--chip',
+    // Sits beside "Claim SET" rather than among the small chips: it is the one
+    // thing a stuck table does together, and it needs to be found without
+    // hunting for it.
+    this.moreButton = button(t('game.moreCards'), 'secondary', () => this.store.toggleMoreCards(), {
+      class: 'btn--more',
       attrs: { 'data-testid': 'more-cards' },
+    });
+
+    // Announced by the server, never by a player. It sits over the board because
+    // the board is exactly what it is telling everyone to stop reading.
+    this.noSetNotice = el('div', {
+      class: 'noSetNotice',
+      attrs: { 'data-testid': 'no-set-notice', role: 'status', hidden: 'hidden' },
+      children: [
+        el('span', { class: 'noSetNotice__title', text: t('game.noSetOnBoard') }),
+        el('span', { class: 'noSetNotice__sub', text: t('game.noSetAdding') }),
+      ],
     });
 
     this.lastSetText = el('span', { class: 'lastSet__who' });
@@ -154,21 +165,21 @@ export class GameScreen {
             el('div', { class: 'headline', children: [this.feed, this.lastSet] }),
           ],
         }),
-        el('main', { class: 'boardWrap', children: [this.board, this.ghosts] }),
+        el('main', { class: 'boardWrap', children: [this.board, this.ghosts, this.noSetNotice] }),
         el('footer', {
           class: 'actionBar',
           children: [
-            // Table aids sit above the two decisive buttons, in a smaller size:
+            // The two hints sit above the decisive buttons, in a smaller size:
             // they are things you reach for occasionally, and mixing them into the
             // same row as "Claim SET" would invite a mis-tap in a race.
             el('div', {
               class: 'actionBar__aids',
-              children: [this.hintButtons[1], this.hintButtons[2], this.moreButton],
+              children: [this.hintButtons[1], this.hintButtons[2]],
             }),
             this.feedback,
             el('div', {
               class: 'actionBar__buttons',
-              children: [this.noSetButton, this.claimButton],
+              children: [this.moreButton, this.claimButton],
             }),
           ],
         }),
@@ -341,9 +352,9 @@ export class GameScreen {
     const seconds = this.store.cooldownSeconds();
     const cooling = seconds > 0;
     const selected = state.selection.length;
+    const noSet = this.store.noSetPending();
 
-    this.claimButton.disabled = cooling || selected !== SET_SIZE;
-    this.noSetButton.disabled = cooling;
+    this.claimButton.disabled = cooling || noSet || selected !== SET_SIZE;
     this.claimButton.textContent = cooling
       ? t('game.cooldown', { seconds })
       : selected === SET_SIZE
@@ -351,10 +362,37 @@ export class GameScreen {
         : t('game.claimSelected', { count: selected });
 
     const feedback = state.feedback;
-    this.feedback.textContent = feedback?.text ?? (cooling ? '' : t('game.selectThree'));
+    // "Select three cards" would be a lie while the board is out of play, and a
+    // countdown already spells out a cooldown on the button itself.
+    this.feedback.textContent = feedback?.text ?? (cooling || noSet ? '' : t('game.selectThree'));
     this.feedback.dataset['tone'] = feedback?.tone ?? 'muted';
 
-    this.updateAids();
+    this.updateNoSetNotice(noSet);
+    this.updateAids(noSet);
+  }
+
+  /**
+   * Show or hide the "no SET on this board" cover.
+   *
+   * The board underneath is left visible on purpose — players want to see the
+   * position they were beaten by — but it stops taking taps, so nobody spends the
+   * pause building a claim that cannot be correct.
+   */
+  private updateNoSetNotice(pending: boolean): void {
+    // Already in the right state: leaving it alone is what keeps the entrance
+    // animation from restarting on every 250ms tick.
+    if (this.noSetNotice.hidden === !pending) return;
+    this.noSetNotice.hidden = !pending;
+    // A class, not `inert`: making the board inert would drop the keyboard focus
+    // a player had on a card and leave them nowhere when the pause ends. The
+    // cards stay focusable and simply refuse to be picked — the store ignores a
+    // tap or an Enter on a board that is out of play, and CSS stops the pointer.
+    this.board.classList.toggle('board--frozen', pending);
+    if (pending && !prefersReducedMotion()) {
+      this.noSetNotice.classList.remove('noSetNotice--in');
+      void this.noSetNotice.offsetWidth;
+      this.noSetNotice.classList.add('noSetNotice--in');
+    }
   }
 
   /**
@@ -363,7 +401,7 @@ export class GameScreen {
    * Runs on the same 250ms tick as the cooldown, so both countdowns stay live
    * without a timer of their own.
    */
-  private updateAids(): void {
+  private updateAids(noSetPending: boolean): void {
     const room = this.store.getState().room;
     if (!room) return;
 
@@ -373,7 +411,7 @@ export class GameScreen {
       const label = t(`game.hint${level}` as StringKey);
       const seconds = this.store.hintUnlockSeconds(level);
       const used = revealed >= level;
-      node.disabled = seconds > 0 || used;
+      node.disabled = seconds > 0 || used || noSetPending;
       node.classList.toggle('btn--done', used);
       node.textContent = used
         ? t('game.hintTaken', { label })
@@ -386,8 +424,8 @@ export class GameScreen {
     const mine = this.store.iWantMoreCards();
     const possible =
       room.deckRemaining >= SET_SIZE && room.board.length + SET_SIZE <= MAX_BOARD_SIZE;
-    this.moreButton.disabled = !possible;
-    this.moreButton.classList.toggle('btn--armed', mine);
+    this.moreButton.disabled = !possible || noSetPending;
+    this.moreButton.classList.toggle('btn--waiting', mine);
     // Somebody is waiting on an answer from this player: make it look like a
     // question rather than another idle chip.
     this.moreButton.classList.toggle('btn--asking', votes > 0 && !mine);

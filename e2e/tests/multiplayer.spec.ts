@@ -4,11 +4,10 @@
  */
 
 import { expect, test } from '@playwright/test';
-import { INITIAL_BOARD_SIZE } from '@set/shared';
+import { INITIAL_BOARD_SIZE, findFirstSet } from '@set/shared';
 import {
   boardCardIds,
   claimCards,
-  pollUntil,
   closePlayers,
   createRoom,
   findNonSetOnBoard,
@@ -98,7 +97,6 @@ test.describe('two players in one room', () => {
     // Visible cooldown on the claim button.
     await expect(maya.page.getByTestId('claim')).toBeDisabled();
     await expect(maya.page.getByTestId('claim')).toContainText(/Wait \d+s/);
-    await expect(maya.page.getByTestId('no-set')).toBeDisabled();
 
     // The board did not change for anyone.
     expect(await boardCardIds(maya.page)).toEqual(before);
@@ -116,8 +114,7 @@ test.describe('two players in one room', () => {
 
     // The cooldown expires on its own and Maya can act again. (The claim button
     // stays disabled only because her selection was cleared by the board change.)
-    await expect(maya.page.getByTestId('no-set')).toBeEnabled({ timeout: 15_000 });
-    await expect(maya.page.getByTestId('claim')).not.toContainText(/Wait/);
+    await expect(maya.page.getByTestId('claim')).not.toContainText(/Wait/, { timeout: 15_000 });
     const again = await ensureSetOnBoard(maya.page);
     await claimCards(maya.page, again);
     await expect.poll(async () => myScore(maya.page), { timeout: 10_000 }).toBe(1);
@@ -156,48 +153,63 @@ test.describe('two players in one room', () => {
     await closePlayers(maya, david);
   });
 
-  test('"No SET on board" is answered authoritatively, whatever the deal', async ({ browser }) => {
+  test('a board with no SET announces itself and grows without anybody calling it', async ({
+    browser,
+  }, testInfo) => {
+    // About one deal in thirty has no SET in it at all, and there is no way to
+    // ask for that board — so this deals rooms until one comes up. Each attempt
+    // is a fresh load rather than a fresh browser, which keeps a ~30-deal hunt to
+    // seconds; the old room is simply abandoned and expires on its own.
+    test.setTimeout(300_000);
     const maya = await newPlayer(browser, 'Maya');
     const david = await newPlayer(browser, 'David');
-    const code = await createRoom(maya);
-    await joinByLink(david, code);
-    await startGame(maya, david);
 
-    const before = await boardCardIds(maya.page);
-    expect(before).toHaveLength(INITIAL_BOARD_SIZE);
-    await maya.page.getByTestId('no-set').click();
+    try {
+      for (let attempt = 0; attempt < 150; attempt++) {
+        // A bare `goto` between attempts would only change the fragment, which
+        // navigates without reloading and would leave the old room on screen.
+        for (const player of [maya, david]) await player.page.goto('about:blank');
+        const code = await createRoom(maya);
+        await joinByLink(david, code);
+        await startGame(maya, david);
 
-    // Wait for one of the two authoritative outcomes rather than reading the
-    // feedback line straight away — it carries default prompt text until the
-    // server replies, which would race.
-    const outcome = await pollUntil(async () => {
-      if ((await maya.page.locator('.card:not(.card--exit)').count()) === 15) return 'dealt';
-      const text = await maya.page.getByTestId('feedback').innerText();
-      return /still a SET/i.test(text) ? 'rejected' : null;
-    });
+        const before = await boardCardIds(maya.page);
+        expect(before).toHaveLength(INITIAL_BOARD_SIZE);
+        if (findFirstSet(before)) {
+          // Playable board: nothing is announced and nothing is dealt.
+          await expect(maya.page.getByTestId('no-set-notice')).toBeHidden();
+          continue;
+        }
 
-    if (outcome === 'rejected') {
-      // A set existed: board untouched, caller cooled down, nobody else affected,
-      // and no set revealed.
-      expect(await boardCardIds(maya.page)).toEqual(before);
-      expect(await boardCardIds(david.page)).toEqual(before);
-      await expect(maya.page.getByTestId('claim')).toContainText(/Wait \d+s/);
-      await expect(maya.page.getByTestId('no-set')).toBeDisabled();
-      await expect(david.page.getByTestId('claim')).not.toContainText(/Wait/);
-      await expect(david.page.getByTestId('no-set')).toBeEnabled();
-      await expect(david.page.getByTestId('feed')).not.toContainText(
-        /oval|diamond|squiggle|purple/i,
-      );
-    } else {
-      // The board genuinely had no set: exactly three cards added, no cooldown,
-      // and the original twelve keep their positions.
-      await expect(david.page.locator('.card:not(.card--exit)')).toHaveCount(15);
-      expect((await boardCardIds(maya.page)).slice(0, 12)).toEqual(before);
-      await expect(maya.page.getByTestId('claim')).not.toContainText(/Wait/);
-      await expect(maya.page.getByTestId('feed')).toContainText(/3 cards added/i);
+        // Both players are told at once, before anyone can waste time searching.
+        for (const player of [maya, david]) {
+          const notice = player.page.getByTestId('no-set-notice');
+          await expect(notice).toBeVisible();
+          await expect(notice).toContainText(/no set on this board/i);
+          // The board is out of play while it is being replaced.
+          await expect(player.page.locator('.board--frozen')).toHaveCount(1);
+        }
+        await expect(maya.page.getByTestId('claim')).toBeDisabled();
+        await maya.page.screenshot({ path: `screenshots/${testInfo.project.name}-no-set.png` });
+
+        // Three cards arrive on their own, for everyone, and cost nobody anything.
+        for (const player of [maya, david]) {
+          await expect(player.page.locator('.card:not(.card--exit)')).toHaveCount(15, {
+            timeout: 15_000,
+          });
+          await expect(player.page.getByTestId('no-set-notice')).toBeHidden();
+          await expect(player.page.getByTestId('claim')).not.toContainText(/Wait/);
+        }
+        expect((await boardCardIds(maya.page)).slice(0, 12)).toEqual(before);
+        await expect(maya.page.getByTestId('feed')).toContainText(/3 cards added/i);
+        return;
+      }
+      throw new Error('no deal in 150 attempts produced a board without a SET');
+    } finally {
+      // Closed however this ends: a leaked context keeps a live socket in the
+      // room and would follow this test into the next one.
+      await closePlayers(maya, david);
     }
-
-    await closePlayers(maya, david);
   });
 
   test('only one of two simultaneous claims on the same cards can win', async ({ browser }) => {

@@ -198,6 +198,70 @@
   margin: 0 auto;
 }
 
+/* The board while the server is replacing a position that has no SET in it. It
+   stays readable — players want to see the board they could not solve — but it
+   is out of play, and it says so by going quiet. */
+.board--frozen {
+  pointer-events: none;
+  opacity: 0.45;
+  filter: saturate(0.55);
+  transition:
+    opacity 180ms ease,
+    filter 180ms ease;
+}
+
+/* Centred over the board rather than in the action bar: the board is what this
+   is telling everyone to stop reading. */
+.noSetNotice {
+  position: absolute;
+  inset-inline: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-inline: auto;
+  max-width: 320px;
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  background: var(--warn-soft);
+  color: var(--warn);
+  box-shadow: var(--shadow-md);
+  text-align: center;
+  pointer-events: none;
+}
+
+.noSetNotice[hidden] {
+  display: none;
+}
+
+.noSetNotice__title {
+  font-size: 1.0625rem;
+  font-weight: 800;
+}
+
+.noSetNotice__sub {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.noSetNotice--in {
+  animation: no-set-in 220ms ease-out;
+}
+
+@keyframes no-set-in {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+}
+
 .board--nudge {
   animation: nudge 340ms ease-in-out;
 }
@@ -548,11 +612,11 @@
   gap: 8px;
 }
 
-/* Hints and "+3 cards": three equal chips on one line, above the two buttons
-   that actually change the game. Small on purpose — they are occasional. */
+/* The two hints: equal chips on one line, above the two buttons that actually
+   change the game. Small on purpose — they are occasional. */
 .actionBar__aids {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -561,6 +625,17 @@
   background: var(--accent-soft);
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* This player has asked and is waiting on everybody else. Deliberately quieter
+   than `btn--asking`: the request is already made, so it is a status, not a
+   prompt — and quieter than `btn--armed`, which is red because leaving a game
+   cannot be undone. */
+.btn--waiting {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  font-weight: 700;
 }
 
 .btn--chip {
@@ -579,7 +654,7 @@
   font-size: 1.0625rem;
 }
 
-.btn--noset {
+.btn--more {
   min-height: 54px;
   font-size: 0.9375rem;
 }

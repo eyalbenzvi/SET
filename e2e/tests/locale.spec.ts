@@ -58,7 +58,7 @@ test.describe('Hebrew by default', () => {
     await startGame(maya, david);
 
     await expect(maya.page.getByTestId('claim')).toContainText('מצאתי SET');
-    await expect(maya.page.getByTestId('no-set')).toContainText('אין SET על השולחן');
+    await expect(maya.page.getByTestId('more-cards')).toContainText('קלפים');
     await expect(maya.page.getByTestId('feed')).toContainText('מתחילים');
 
     // A three-symbol card must read "3 <plural shape> <plural colour> <plural fill>".

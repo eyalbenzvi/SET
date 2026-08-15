@@ -28,12 +28,12 @@ same and one different, it is not a set.
 
 Twelve cards are dealt face up. Everyone searches at once. Claim three cards and
 the server checks them: correct scores a point and the cards are replaced; wrong
-pauses only you for two seconds and explains which feature clashed. If nobody
-can find a set, anyone can press **No SET on board** — the server recomputes the
-answer, deals three more cards if the caller was right, and applies the same
-two-second pause if they were wrong. The game ends when the deck is empty and no
-set remains; final ranking is by number of sets found, and equal scores are a
-genuine tie.
+pauses only you for two seconds and explains which feature clashed. Sometimes a
+board contains no set at all — the server knows that the instant the board
+changes, says so on everyone's screen, and deals three more cards a beat later,
+so nobody spends time hunting a dead position. The game ends when the deck is
+empty and no set remains; final ranking is by number of sets found, and equal
+scores are a genuine tie.
 
 The four questions players ask first, answered explicitly:
 
@@ -43,30 +43,41 @@ The four questions players ask first, answered explicitly:
   claimed wrongly, for two seconds, while everyone else keeps going.
 - **Does the board refill?** Yes, back to twelve: a claimed set is replaced in the
   same three places, so the layout does not jump around. Once the deck runs out the
-  board simply gets smaller. The exception is a correct **No SET on board**, which
-  deals three extra cards on top — the board then holds 15 (or 18, 21…) until a set
-  is taken from it, and only then shrinks back towards twelve.
+  board simply gets smaller. The exception is a board with no set in it, which gets
+  three extra cards on top — the board then holds 15 (or 18, 21…) until a set is
+  taken from it, and only then shrinks back towards twelve.
 - **Is there a deck?** Yes — 81 cards, minus the twelve on the table. The header
   shows how many are left, so everyone can see the endgame coming.
+
+### What happens when the board has no set
+
+Nothing to call, nothing to notice. The server re-checks the board after every
+change — the opening deal, every claim, every extra three cards — and the moment a
+board provably contains no set it tells the whole table so, freezes the board and
+deals three more cards a second and a half later. That pause is only there so the
+message can be read and the new cards seen arriving; a claim made during it is
+refused without a cooldown, because there was no correct claim to make. If the
+deck is empty when this happens, the same check ends the game.
 
 ### Three things the table can do together
 
 - **More cards, by agreement.** Anyone can tap **+3 cards**. Nothing happens until
   every connected player has asked for it, and then three cards are dealt on top of
-  the board. This is the only way to grow the board while a set is still findable,
-  and requiring the whole table means one stuck player can never blow up a position
-  somebody else has already spotted. A request lapses after 45 seconds, and any
-  board change cancels it, so a forgotten tap never deals into a different
-  position. The board stops at **21 cards**: the largest set-free collection in SET
-  is 20 cards, so 21 face-up cards are guaranteed to contain a set and more can
-  never help.
+  the board. This is how a table that is stuck — on a board that _does_ have a set
+  somewhere — gets a way forward, and requiring the whole table means one stuck
+  player can never blow up a position somebody else has already spotted. A request
+  lapses after 45 seconds, and any board change cancels it, so a forgotten tap
+  never deals into a different position. The board stops at **21 cards**: the
+  largest set-free collection in SET is 20 cards, so 21 face-up cards are
+  guaranteed to contain a set and more can never help.
 - **Hints, on a clock.** After 30 seconds on the same board, **Hint 1** marks one
   card that really is part of a set. Thirty seconds later, **Hint 2** marks two —
   which leaves exactly one card that can complete them. The clock runs on the current board and
   restarts whenever the board changes, so it measures time actually spent stuck. The
   cards go only to the player who asked; everyone else is told a hint was taken and
-  never which cards it named. The server refuses a hint on a set-free board and says
-  so, which is a nudge towards **No SET on board** rather than a leak.
+  never which cards it named. A hint asked for on a set-free board is refused with
+  the same answer everyone already has on screen: there is nothing there, and cards
+  are on the way.
 - **See the set that was just taken.** When anyone claims a set, the three cards
   appear at the top of every screen for a few seconds, with who took them. Without
   it, a player looking at another corner of the board never finds out what the set
@@ -238,7 +249,7 @@ VITE_BASE=/<repo>/ VITE_API_BASE=https://your-worker-url npm run build
 
 The Durable Object is the only authority. It owns deck order, board state,
 scores, phase, host identity, membership and cooldowns; clients send intents
-(`join`, `start`, `claim`, `noSet`, `rematch`, `leave`) and render whatever
+(`join`, `start`, `claim`, `deal`, `hint`, `rematch`, `leave`) and render whatever
 authoritative state comes back. Every inbound frame is validated at runtime, not
 merely typed. Because a Durable Object is single-threaded and every state
 transition is synchronous, simultaneous claims serialise naturally; a

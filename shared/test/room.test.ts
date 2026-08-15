@@ -8,6 +8,7 @@ import {
   MAX_BOARD_SIZE,
   MAX_PLAYERS,
   MIN_PLAYERS,
+  NO_SET_PAUSE_MS,
   PROTOCOL_VERSION,
   RECONNECT_GRACE_MS,
   ROOM_IDLE_TTL_MS,
@@ -18,7 +19,6 @@ import {
   type GameEventKind,
   type HintRejectedMessage,
   type HintRevealedMessage,
-  type NoSetRejectedMessage,
   type ServerMessage,
 } from '../src/protocol.js';
 import {
@@ -118,6 +118,17 @@ function setOnBoard(room: GameRoom): CardId[] {
   const found = findFirstSet(room.getBoard());
   if (!found) throw new Error('board has no set');
   return [...found];
+}
+
+/**
+ * Let the pause on a set-free board run out and deal what the server decided.
+ *
+ * This is the whole "no SET" flow now: nobody calls it, so a test that wants the
+ * position resolved waits exactly as the players do.
+ */
+function passNoSetPause(room: GameRoom, env: ReturnType<typeof testEnv>): Emission[] {
+  env.advance(NO_SET_PAUSE_MS);
+  return room.tick();
 }
 
 /** Three board cards that are definitely not a set. */
@@ -398,9 +409,9 @@ describe('valid SET claims', () => {
 
   it('does NOT replace cards when the board has more than 12 cards', () => {
     // Reach a 15-card board by finding a seed whose initial deal is set-free.
-    const { room, host } = setFreeBoardRoom();
+    const { room, env, host } = setFreeBoardRoom();
     expect(hasSet(room.getBoard())).toBe(false);
-    room.noSet(host.playerId, room.getBoardVersion());
+    passNoSetPause(room, env);
     expect(room.getBoard()).toHaveLength(15);
 
     const deckBefore = room.getDeckRemaining();
@@ -414,7 +425,7 @@ describe('valid SET claims', () => {
   });
 
   it('shrinks the board instead of replacing when the deck is empty', () => {
-    const { room, host, guest } = startedRoom();
+    const { room, env, host, guest } = startedRoom();
     // Play the game out; once the deck empties, boards must shrink.
     let sawShrink = false;
     for (let i = 0; i < 40 && room.getPhase() === 'playing'; i++) {
@@ -428,7 +439,7 @@ describe('valid SET claims', () => {
           sawShrink = true;
         }
       } else {
-        room.noSet(player.playerId, room.getBoardVersion());
+        passNoSetPause(room, env);
       }
       expect(checkRoomInvariants(room)).toEqual([]);
     }
@@ -595,85 +606,137 @@ function setFreeBoardRoom(): {
   throw new Error('no seed produced a set-free opening board');
 }
 
-describe('"No SET on board"', () => {
-  it('is rejected with a cooldown when a set does exist, without revealing it', () => {
-    const { room, env, host, guest } = startedRoom();
-    expect(hasSet(room.getBoard())).toBe(true);
-    const before = [...room.getBoard()];
-
-    const emissions = room.noSet(host.playerId, room.getBoardVersion());
-    expect(room.getBoard()).toEqual(before);
-    const rejection = privateMessages(emissions, 'noSetRejected')[0]!
-      .message as NoSetRejectedMessage;
-    expect(rejection.reason).toBe('set_exists');
-    expect(rejection.cooldownUntil).toBe(env.now() + INVALID_ACTION_COOLDOWN_MS);
-    // No card ids leak in any message produced by the rejection.
-    expect(JSON.stringify(emissions)).not.toContain('cards');
-    expect(eventsOf(emissions)).toEqual(['noSetRejected']);
-    expect(room.snapshot().players.find((p) => p.id === guest.playerId)!.cooldownUntil).toBe(0);
+describe('a board with no SET', () => {
+  it('is announced the moment it appears, with the deal already on the clock', () => {
+    const { room, env } = setFreeBoardRoom();
+    // Nobody called this: the announcement came out of `start()` itself.
+    expect(room.getAutoDealAt()).toBe(env.now() + NO_SET_PAUSE_MS);
+    expect(room.snapshot().autoDealAt).toBe(env.now() + NO_SET_PAUSE_MS);
+    expect(room.nextTimerAt()).toBe(env.now() + NO_SET_PAUSE_MS);
+    expect(room.getBoard()).toHaveLength(INITIAL_BOARD_SIZE);
   });
 
-  it('deals exactly three extra cards when the board really has no set', () => {
-    const { room, host } = setFreeBoardRoom();
+  it('says nothing at all on a board that does have a set', () => {
+    const { room } = startedRoom();
+    expect(hasSet(room.getBoard())).toBe(true);
+    expect(room.getAutoDealAt()).toBe(0);
+    expect(room.snapshot().autoDealAt).toBe(0);
+  });
+
+  it('deals exactly three extra cards when the pause elapses, at nobody\u2019s expense', () => {
+    const { room, env } = setFreeBoardRoom();
     const deckBefore = room.getDeckRemaining();
     const before = [...room.getBoard()];
     const version = room.getBoardVersion();
 
-    const emissions = room.noSet(host.playerId, version);
-    const event = firstEvent(emissions, 'cardsAdded');
-    expect(event).toMatchObject({ count: 3, playerId: host.playerId });
+    // Nothing happens a tick early: the pause is there to be seen.
+    env.advance(NO_SET_PAUSE_MS - 1);
+    expect(room.tick()).toEqual([]);
+    expect(room.getBoard()).toEqual(before);
+
+    env.advance(1);
+    const emissions = room.tick();
+    expect(firstEvent(emissions, 'cardsAdded')).toMatchObject({ count: 3, reason: 'auto' });
     expect(room.getBoard()).toHaveLength(15);
     expect(room.getBoard().slice(0, 12)).toEqual(before);
     expect(room.getDeckRemaining()).toBe(deckBefore - 3);
     expect(room.getBoardVersion()).toBe(version + 1);
-    expect(room.snapshot().players.find((p) => p.id === host.playerId)!.cooldownUntil).toBe(0);
+    for (const player of room.snapshot().players) expect(player.cooldownUntil).toBe(0);
     expect(checkRoomInvariants(room)).toEqual([]);
   });
 
-  it('is rejected on a stale board version without a cooldown', () => {
-    const { room, host } = startedRoom();
-    const stale = room.getBoardVersion() - 1;
-    const emissions = room.noSet(host.playerId, stale);
-    const rejection = privateMessages(emissions, 'noSetRejected')[0]!
-      .message as NoSetRejectedMessage;
-    expect(rejection.reason).toBe('board_changed');
-    expect(rejection.cooldownUntil).toBe(0);
-  });
-
-  it('honours an existing cooldown', () => {
-    const { room, host } = startedRoom();
-    room.claim(host.playerId, nonSetOnBoard(room), room.getBoardVersion());
-    const emissions = room.noSet(host.playerId, room.getBoardVersion());
-    expect(
-      (privateMessages(emissions, 'noSetRejected')[0]!.message as NoSetRejectedMessage).reason,
-    ).toBe('cooldown');
-  });
-
-  it('is rejected outside the playing phase', () => {
-    const env = testEnv();
-    const room = new GameRoom('ABC234', env);
-    const host = join(room, 'Maya');
-    const emissions = room.noSet(host.playerId, 0);
-    expect(
-      (privateMessages(emissions, 'noSetRejected')[0]!.message as NoSetRejectedMessage).reason,
-    ).toBe('not_playing');
-  });
-
-  it('ends the game when the board has no set and the deck is empty', () => {
-    const { room, host, guest } = startedRoom(11);
-    // Drain the deck by playing normally.
+  it('tells the whole table at once, not the player who happened to act', () => {
+    const { room, env, host, guest } = startedRoom();
     let guard = 0;
-    while (room.getPhase() === 'playing' && guard++ < 60) {
-      const player = guard % 2 === 0 ? host : guest;
-      if (hasSet(room.getBoard())) {
-        room.claim(player.playerId, setOnBoard(room), room.getBoardVersion());
-      } else {
-        room.noSet(player.playerId, room.getBoardVersion());
+    let emissions: Emission[] = [];
+    // Play until a claim leaves a board with nothing left to find.
+    while (room.getPhase() === 'playing' && guard++ < 200) {
+      if (!hasSet(room.getBoard())) {
+        passNoSetPause(room, env);
+        continue;
       }
+      const player = guard % 2 === 0 ? host : guest;
+      emissions = room.claim(player.playerId, setOnBoard(room), room.getBoardVersion());
+      if (eventsOf(emissions).includes('noSetOnBoard')) break;
+    }
+    expect(eventsOf(emissions)).toContain('noSetOnBoard');
+    for (const emission of emissions) {
+      if (emission.message.t === 'event' && emission.message.event.k === 'noSetOnBoard') {
+        expect(emission.target).toEqual({ kind: 'all' });
+        // It is a statement about the board, not about a player.
+        expect(Object.keys(emission.message.event)).toEqual(['k', 'dealsAt']);
+      }
+    }
+  });
+
+  it('refuses a claim made during the pause, without a cooldown', () => {
+    const { room, host, guest } = setFreeBoardRoom();
+    const before = [...room.getBoard()];
+    const emissions = room.claim(host.playerId, nonSetOnBoard(room), room.getBoardVersion());
+
+    const rejection = privateMessages(emissions, 'claimRejected')[0]!
+      .message as ClaimRejectedMessage;
+    expect(rejection.reason).toBe('no_set_on_board');
+    // Being on a dead board is not a mistake, so it costs nothing.
+    expect(rejection.cooldownUntil).toBe(0);
+    expect(eventsOf(emissions)).toEqual([]);
+    expect(room.getBoard()).toEqual(before);
+    expect(room.snapshot().players.find((p) => p.id === guest.playerId)!.cooldownUntil).toBe(0);
+  });
+
+  it('still calls a stale claim stale, rather than blaming the dead board', () => {
+    const { room, host } = setFreeBoardRoom();
+    const emissions = room.claim(host.playerId, nonSetOnBoard(room), room.getBoardVersion() - 1);
+    expect(
+      (privateMessages(emissions, 'claimRejected')[0]!.message as ClaimRejectedMessage).reason,
+    ).toBe('board_changed');
+  });
+
+  it('announces again when the three new cards are set-free too', () => {
+    // Drive a real game until a deal lands on another dead board, then check the
+    // server picked it up on its own rather than waiting to be told.
+    for (let seed = 1; seed < 600; seed++) {
+      const { room, env, host, guest } = startedRoom(seed);
+      let guard = 0;
+      let sawRepeat = false;
+      while (room.getPhase() === 'playing' && guard++ < 200) {
+        if (hasSet(room.getBoard())) {
+          const player = guard % 2 === 0 ? host : guest;
+          room.claim(player.playerId, setOnBoard(room), room.getBoardVersion());
+          continue;
+        }
+        const size = room.getBoard().length;
+        const emissions = passNoSetPause(room, env);
+        if (eventsOf(emissions).includes('cardsAdded') && room.getAutoDealAt() > 0) {
+          expect(hasSet(room.getBoard())).toBe(false);
+          expect(room.getBoard()).toHaveLength(size + SET_SIZE);
+          expect(firstEvent(emissions, 'noSetOnBoard').dealsAt).toBe(room.getAutoDealAt());
+          sawRepeat = true;
+          break;
+        }
+      }
+      if (sawRepeat) return;
+    }
+    throw new Error('no seed produced two set-free boards in a row');
+  });
+
+  it('ends the game instead of dealing when the deck is empty', () => {
+    const { room, env, host, guest } = startedRoom(11);
+    let guard = 0;
+    let last: Emission[] = [];
+    while (room.getPhase() === 'playing' && guard++ < 200) {
+      const player = guard % 2 === 0 ? host : guest;
+      last = hasSet(room.getBoard())
+        ? room.claim(player.playerId, setOnBoard(room), room.getBoardVersion())
+        : passNoSetPause(room, env);
     }
     expect(room.getPhase()).toBe('finished');
     expect(room.getDeckRemaining()).toBe(0);
     expect(hasSet(room.getBoard())).toBe(false);
+    // The last thing the table is told is why: no set, and nothing left to deal.
+    expect(eventsOf(last).slice(-2)).toEqual(['noSetOnBoard', 'gameOver']);
+    expect(firstEvent(last, 'noSetOnBoard').dealsAt).toBe(0);
+    expect(room.getAutoDealAt()).toBe(0);
   });
 });
 
@@ -682,7 +745,7 @@ describe('game completion', () => {
     // Play 60 full games with different shuffles and assert the invariant holds
     // at every single step.
     for (let seed = 1; seed <= 60; seed++) {
-      const { room, host, guest } = startedRoom(seed);
+      const { room, env, host, guest } = startedRoom(seed);
       let guard = 0;
       while (room.getPhase() === 'playing') {
         expect(guard++).toBeLessThan(200);
@@ -692,19 +755,12 @@ describe('game completion', () => {
         if (hasSet(board)) {
           room.claim(player.playerId, setOnBoard(room), room.getBoardVersion());
         } else {
-          // A set-free board must always be resolvable: either three more cards
-          // can be dealt, or the game must end on this call.
+          // A set-free board must always be announced and then resolved on its
+          // own: either three more cards are dealt, or the game ends here.
+          expect(room.getAutoDealAt()).toBeGreaterThan(0);
           const deckBefore = room.getDeckRemaining();
-          const emissions = room.noSet(player.playerId, room.getBoardVersion());
-          if (deckBefore >= 3) {
-            expect(eventsOf(emissions)).toContain('cardsAdded');
-          } else {
-            expect(eventsOf(emissions)).toContain('gameOver');
-          }
-          const rejected = privateMessages(emissions, 'noSetRejected');
-          expect(rejected.map((r) => (r.message as NoSetRejectedMessage).reason)).not.toContain(
-            'set_exists',
-          );
+          const emissions = passNoSetPause(room, env);
+          expect(eventsOf(emissions)).toContain(deckBefore >= 3 ? 'cardsAdded' : 'gameOver');
         }
       }
       expect(room.getPhase()).toBe('finished');
@@ -718,21 +774,24 @@ describe('game completion', () => {
     }
   });
 
-  it('finishes immediately after a claim that empties the deck and leaves no set', () => {
-    const { room, host, guest } = startedRoom(3);
+  it('ends on the claim itself when it empties the deck and leaves no set', () => {
+    const { room, env, host, guest } = startedRoom(3);
     let last: Emission[] = [];
     let guard = 0;
     while (room.getPhase() === 'playing' && guard++ < 200) {
       const player = guard % 2 === 0 ? host : guest;
       last = hasSet(room.getBoard())
         ? room.claim(player.playerId, setOnBoard(room), room.getBoardVersion())
-        : room.noSet(player.playerId, room.getBoardVersion());
+        : passNoSetPause(room, env);
     }
+    // No pause and no timer: with nothing left to deal there is nothing to wait
+    // for, so the results screen comes straight off the winning claim.
     expect(eventsOf(last)).toContain('gameOver');
+    expect(room.nextTimerAt()).toBeNull();
   });
 
   it('reports a tie as a tie, with no invented tie-breaker', () => {
-    const { room, host, guest } = startedRoom(5);
+    const { room, env, host, guest } = startedRoom(5);
     let guard = 0;
     let final: Emission[] = [];
     while (room.getPhase() === 'playing' && guard++ < 200) {
@@ -740,7 +799,7 @@ describe('game completion', () => {
       const player = guard % 2 === 0 ? host : guest;
       final = hasSet(room.getBoard())
         ? room.claim(player.playerId, setOnBoard(room), room.getBoardVersion())
-        : room.noSet(player.playerId, room.getBoardVersion());
+        : passNoSetPause(room, env);
     }
     const over = firstEvent(final, 'gameOver');
     const scores = room.snapshot().players.map((p) => p.score);
@@ -759,7 +818,7 @@ describe('rematch', () => {
       if (hasSet(ctx.room.getBoard())) {
         ctx.room.claim(player.playerId, setOnBoard(ctx.room), ctx.room.getBoardVersion());
       } else {
-        ctx.room.noSet(player.playerId, ctx.room.getBoardVersion());
+        passNoSetPause(ctx.room, ctx.env);
       }
     }
     expect(ctx.room.getPhase()).toBe('finished');
@@ -965,6 +1024,31 @@ describe('persistence', () => {
     ).toHaveLength(1);
   });
 
+  it('restarts the pause on a set-free board rather than trusting a stopped clock', () => {
+    const { room, env } = setFreeBoardRoom();
+    // The room is evicted mid-pause and comes back much later.
+    const stored = JSON.parse(JSON.stringify(room.serialize()));
+    env.advance(ROOM_IDLE_TTL_MS);
+    const restored = GameRoom.deserialize(stored, env);
+    expect(restored.getAutoDealAt()).toBe(env.now() + NO_SET_PAUSE_MS);
+    expect(eventsOf(passNoSetPause(restored, env))).toContain('cardsAdded');
+    expect(restored.getBoard()).toHaveLength(INITIAL_BOARD_SIZE + SET_SIZE);
+  });
+
+  it('rescues a v2 room parked on a set-free board, which nothing else can resolve now', () => {
+    const { room, env } = setFreeBoardRoom();
+    // Exactly what version 2 wrote: no record of a pending deal, because the
+    // position waited for a player to call it.
+    const v2 = JSON.parse(JSON.stringify(room.serialize())) as Record<string, unknown>;
+    v2['s'] = 2;
+    delete v2['autoDealAt'];
+
+    const restored = GameRoom.deserialize(v2 as never, env);
+    expect(restored.getAutoDealAt()).toBe(env.now() + NO_SET_PAUSE_MS);
+    expect(restored.snapshot().dealVotes).toEqual([]);
+    expect(checkRoomInvariants(restored)).toEqual([]);
+  });
+
   it('still rejects a wrong token after a restart', () => {
     const { room, env, host } = startedRoom();
     const restored = GameRoom.deserialize(JSON.parse(JSON.stringify(room.serialize())), env);
@@ -987,20 +1071,25 @@ function agreeToDeal(room: GameRoom, seats: Seat[]): Emission[] {
 }
 
 /** A mid-game room whose deck has run out but which is still being played. */
-function drainedDeckRoom(): { room: GameRoom; host: Seat; guest: Seat } {
+function drainedDeckRoom(): {
+  room: GameRoom;
+  env: ReturnType<typeof testEnv>;
+  host: Seat;
+  guest: Seat;
+} {
   for (let seed = 1; seed < 400; seed++) {
-    const { room, host, guest } = startedRoom(seed);
+    const { room, env, host, guest } = startedRoom(seed);
     let guard = 0;
     while (room.getPhase() === 'playing' && room.getDeckRemaining() > 0 && guard++ < 100) {
       const player = guard % 2 === 0 ? host : guest;
       if (hasSet(room.getBoard())) {
         room.claim(player.playerId, setOnBoard(room), room.getBoardVersion());
       } else {
-        room.noSet(player.playerId, room.getBoardVersion());
+        passNoSetPause(room, env);
       }
     }
     if (room.getPhase() === 'playing' && room.getDeckRemaining() === 0) {
-      return { room, host, guest };
+      return { room, env, host, guest };
     }
   }
   throw new Error('no seed left the deck empty with the game still running');
@@ -1131,6 +1220,25 @@ describe('dealing more cards by agreement', () => {
       (privateMessages(emissions, 'dealRejected')[0]!.message as DealRejectedMessage).reason,
     ).toBe('board_full');
     expect(room.getBoard()).toHaveLength(MAX_BOARD_SIZE);
+    expect(checkRoomInvariants(room)).toEqual([]);
+  });
+
+  it('does not deal twice when the table asks during the pause on a dead board', () => {
+    const { room, env, host, guest } = setFreeBoardRoom();
+    const deckBefore = room.getDeckRemaining();
+    expect(room.getAutoDealAt()).toBeGreaterThan(0);
+
+    // Both players tap "+3 cards" before the automatic deal lands.
+    agreeToDeal(room, [host, guest]);
+    expect(room.getBoard()).toHaveLength(INITIAL_BOARD_SIZE + SET_SIZE);
+    expect(room.getDeckRemaining()).toBe(deckBefore - SET_SIZE);
+
+    // The pending deal belonged to the board that just went away.
+    const after = room.getAutoDealAt();
+    env.advance(NO_SET_PAUSE_MS);
+    room.tick();
+    const dealt = deckBefore - room.getDeckRemaining();
+    expect(dealt).toBe(after > 0 ? SET_SIZE * 2 : SET_SIZE);
     expect(checkRoomInvariants(room)).toEqual([]);
   });
 
